@@ -23,6 +23,7 @@ VIDEO_PROBLEMS = {
     "-4": "NanoKVM video mode changed",
     "-5": "NanoKVM video capture is disabled",
 }
+POINTER_EVENTS = {"absolute", "relative", "button", "button_click", "scroll"}
 
 
 class FirmwareError(RuntimeError):
@@ -198,6 +199,13 @@ class HID:
         self.pointer()
         self.absolute = None
 
+    def repair_iphone_drag(self):
+        # Match the NanoKVM web console's two button-free wheel reports.
+        virtual_pointer = 17
+        self.emit(virtual_pointer, 3, struct.pack("<BHHh", 0, 32768, 32768, 1))
+        time.sleep(0.030)
+        self.emit(virtual_pointer, 3, struct.pack("<BHHh", 0, 32768, 32768, -1))
+
     def event(self, report, firmware):
         kind = report["event"]
         if kind == "key":
@@ -244,11 +252,13 @@ class HID:
 
 
 class Bridge:
-    def __init__(self, firmware, directory, status, sensitivity=100, audio_key=""):
+    def __init__(self, firmware, directory, status, sensitivity=100, audio_key="", *, iphone_drag_repair=False):
         self.firmware = firmware
         self.directory = directory
         self.status = status
         self.sensitivity = sensitivity
+        self.iphone_drag_repair = iphone_drag_repair
+        self.iphone_video_recovered = threading.Event()
         self.stopping = threading.Event()
         self.video = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.input = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -289,6 +299,7 @@ class Bridge:
             worker.join(timeout=TIMEOUT + 1)
 
     def video_loop(self):
+        no_image = False
         while not self.stopping.is_set():
             try:
                 client, _ = self.video.accept()
@@ -306,6 +317,9 @@ class Bridge:
                         frame = upstream.recv()
                         if isinstance(frame, bytes) and 10 <= len(frame) <= MAX_FRAME:
                             problem = None
+                            if no_image:
+                                self.iphone_video_recovered.set()
+                                no_image = False
                             client.sendall(struct.pack(">I", len(frame)) + frame)
                             if not active:
                                 self.status("Streaming NanoKVM")
@@ -320,6 +334,8 @@ class Bridge:
                                     code = notice.get("data")
                                     if isinstance(code, str):
                                         problem = VIDEO_PROBLEMS.get(code)
+                                        if self.iphone_drag_repair and code == "-1":
+                                            no_image = True
                             if not frame or time.monotonic() - started > TIMEOUT:
                                 raise FirmwareError("No direct H.264 video")
             except (BrokenPipeError, ConnectionResetError):
@@ -350,6 +366,7 @@ class Bridge:
     def input_loop(self):
         peer = None
         heartbeat_at = 0.0
+        repair_pending = False
         try:
             while not self.stopping.is_set():
                 try:
@@ -365,14 +382,21 @@ class Bridge:
                             heartbeat_at = time.monotonic() + 10
                         continue
                     report = json.loads(raw)
+                    kind = report.get("event")
                     if peer is None:
-                        if report.get("event") == "reset":
+                        if kind == "reset":
                             continue
                         peer = self.firmware.ws("/api/ws")
                         hid = HID(peer, self.sensitivity)
                         heartbeat_at = time.monotonic() + 10
+                        repair_pending = self.iphone_drag_repair
+                    if (kind in POINTER_EVENTS and not hid.buttons
+                            and (repair_pending or self.iphone_video_recovered.is_set())):
+                        self.iphone_video_recovered.clear()
+                        hid.repair_iphone_drag()
+                        repair_pending = False
                     hid.event(report, self.firmware)
-                    if report.get("event") == "reset":
+                    if kind == "reset":
                         peer.close()
                         peer = None
                 except (OSError, ValueError, KeyError, websocket.WebSocketException, FirmwareError):

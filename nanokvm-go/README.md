@@ -22,6 +22,7 @@ Edit NanoU’s app configuration under **Settings → Apps → Installed**. The 
 | UU device name | Updates the device alias in UU Remote. Leave empty to keep the existing name. |
 | Start NanoU at boot | Enter `true` to run in the background and start automatically after reboot. Open NanoU once on the touchscreen to apply the setting and pair if needed. Enter `false` and reopen NanoU to disable the background service. |
 | Stream target audio | Enter `true` to hear the attached computer in UU Remote. Enable **Virtual Audio** and **MCP Service** on the NanoKVM Go, then provide the local **MCP API key for audio** in NanoU’s app settings. |
+| Repair iPhone drag automatically | Enter `true` when the attached target is an iPhone with AssistiveTouch enabled. NanoU runs the repair before the first mouse input after reconnecting. Use Mouse Pointer mode in UU Remote. |
 | Relative mouse sensitivity | Use 25–400 percent. The default is 100. Absolute pointer mode keeps its screen coordinates. |
 
 Boot startup and audio default to off. Audio sends computer sound to the viewer. The touchscreen must be used for the first UU pairing even with boot startup enabled.

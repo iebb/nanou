@@ -22,6 +22,7 @@ NanoU 是运行在 NanoKVM Go 上的 32 位 ARM SDK 应用。它将设备硬件�
 | **UU device name** | 更新 UU 远程设备列表中的名称。留空保留现有名称。 |
 | **Start NanoU at boot** | 填写 `true` 后可在后台运行并随设备启动。在触屏上打开一次 NanoU 以应用设置，首次使用时仍需扫码。填写 `false` 并重新打开应用可停用后台服务。 |
 | **Stream target audio** | 填写 `true` 后可在 UU 远程中听到目标电脑的声音。请先在 NanoKVM Go 上开启**虚拟音频**和 **MCP 服务**，再在 NanoU 中填写本机 MCP API 密钥。 |
+| **Repair iPhone drag automatically** | 如果连接到 NanoKVM Go 的目标设备是已开启辅助触控的 iPhone，请填写 `true`。重新连接后，NanoU 会在处理第一次鼠标输入前自动修复拖拽。请在 UU 远程中使用鼠标指针模式。 |
 | **Relative mouse sensitivity** | 相对鼠标移动的灵敏度，范围为 25–400%，默认 100%。绝对坐标模式仍按屏幕位置定位。 |
 
 开机启动和声音传输默认关闭。声音从目标电脑传向 UU 客户端。

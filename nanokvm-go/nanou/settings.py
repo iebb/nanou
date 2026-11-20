@@ -30,6 +30,7 @@ class Settings:
     audio: bool
     mcp_key: str = field(repr=False)
     sensitivity: int
+    iphone_drag_repair: bool = False
 
     @classmethod
     def from_env(cls, values):
@@ -52,4 +53,5 @@ class Settings:
             audio=enabled_setting(values, "NANOU_AUDIO", "Audio"),
             mcp_key=values.get("NANOU_KVM_MCP_KEY", "").strip(),
             sensitivity=sensitivity,
+            iphone_drag_repair=enabled_setting(values, "NANOU_IPHONE_DRAG_REPAIR", "Repair iPhone drag"),
         )

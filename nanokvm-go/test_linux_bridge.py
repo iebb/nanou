@@ -62,6 +62,7 @@ class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
         receiver.accept.side_effect = [(MagicMock(), None), OSError()]
         bridge = SimpleNamespace(
             video=receiver, stopping=threading.Event(), firmware=Mock(), status=Mock(),
+            iphone_drag_repair=False,
         )
         bridge.firmware.ws.return_value = upstream
         Bridge.video_loop(bridge)
@@ -88,7 +89,8 @@ class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
         receiver.recv.side_effect = reports()
         bridge = SimpleNamespace(
             input=receiver, stopping=threading.Event(), firmware=firmware,
-            status=Mock(), sensitivity=100,
+            status=Mock(), sensitivity=100, iphone_drag_repair=False,
+            iphone_video_recovered=threading.Event(),
         )
         with patch("bridge.time", clock):
             Bridge.input_loop(bridge)
@@ -96,6 +98,40 @@ class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
         old_peer.close.assert_called_once()
         recovered_report = new_peer.send_binary.call_args_list[0].args[0]
         self.assertEqual(recovered_report[13:], b"\x00\x00\x04\x00\x00\x00\x00\x00")
+
+    def test_iphone_repair_precedes_pointer_after_reconnect(self):
+        first, second = Mock(), Mock()
+        pointer = b'{"event":"absolute","x":0.25,"y":0.25}'
+        receiver = Mock()
+        video_recovered = threading.Event()
+
+        def reports():
+            yield pointer
+            yield pointer
+            yield b'{"event":"reset"}'
+            yield pointer
+            video_recovered.set()
+            yield pointer
+            yield OSError()
+
+        receiver.recv.side_effect = reports()
+        bridge = SimpleNamespace(
+            input=receiver, stopping=threading.Event(), firmware=Mock(),
+            status=Mock(), sensitivity=100, iphone_drag_repair=True,
+            iphone_video_recovered=video_recovered,
+        )
+        bridge.firmware.ws.side_effect = [first, second]
+        with patch("bridge.time.sleep") as delay:
+            Bridge.input_loop(bridge)
+
+        repair = [(17, (0, 32768, 32768, 1)), (17, (0, 32768, 32768, -1))]
+        move = [(2, (0, 16384, 16384, 0))]
+        for peer, expected in ((first, repair + move + move), (second, (repair + move) * 2)):
+            packets = [entry.args[0] for entry in peer.send_binary.call_args_list]
+            decoded = [(packet[2], struct.unpack("<BHHh", packet[13:])) for packet in packets[:len(expected)]]
+            self.assertTrue(all(packet[3] == 3 for packet in packets[:len(expected)]))
+            self.assertEqual(decoded, expected)
+        self.assertEqual([call.args for call in delay.call_args_list], [(0.030,)] * 3)
 
     def test_https_urls_and_port(self):
         self.assertEqual(target("https://kvm.example:9443/"), ("kvm.example", 9443))

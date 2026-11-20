@@ -3,7 +3,7 @@
   "name": "NanoU",
   "creator": "NanoU",
   "create_time": "2026-11-20",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "desc": "Stream the locally attached computer to the official UU Remote app.",
   "category": "Remote control",
   "env": {
@@ -37,6 +37,11 @@
     "NANOU_KVM_MCP_KEY": {
       "label": "Local NanoKVM MCP API key for audio",
       "secret": true
+    },
+    "NANOU_IPHONE_DRAG_REPAIR": {
+      "label": "Repair iPhone drag automatically",
+      "description": "Enter true for a physically attached iPhone with AssistiveTouch. Runs before the first mouse input after reconnecting.",
+      "default": "false"
     },
     "NANOU_MOUSE_SENSITIVITY": {
       "label": "Relative mouse sensitivity (%)",

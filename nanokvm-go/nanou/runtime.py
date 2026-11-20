@@ -157,7 +157,8 @@ def _run_locked(settings, directory, cancel, report, can_enroll, link_only, runt
         if link_only or cancel.is_set():
             return True
         audio_key = settings.mcp_key if settings.audio else ""
-        with Bridge(firmware, directory, report, settings.sensitivity, audio_key) as bridge:
+        with Bridge(firmware, directory, report, settings.sensitivity, audio_key,
+                    iphone_drag_repair=settings.iphone_drag_repair) as bridge:
             if owner is not None:
                 for name in ("video", "input", "audio") if bridge.audio else ("video", "input"):
                     os.chown(directory / name, *owner)
