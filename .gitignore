@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+uu_tunnel.json
+/vendor/aioice/build/
+*.egg-info/
+/nanokvm-go/NanoU-armv7.zip
+/nanokvm-go/nanou/state/
+/nanokvm-go/nanou/.nanou-service/

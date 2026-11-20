@@ -1,0 +1,47 @@
+{
+  "app_id": "com.nanou.remote",
+  "name": "NanoU",
+  "creator": "NanoU",
+  "create_time": "2026-11-20",
+  "version": "0.3.0",
+  "desc": "Stream the locally attached computer to the official UU Remote app.",
+  "category": "Remote control",
+  "env": {
+    "NANOU_KVM_USER": {
+      "label": "Local NanoKVM username",
+      "required": true
+    },
+    "NANOU_KVM_PASSWORD": {
+      "label": "Local NanoKVM password",
+      "required": true,
+      "secret": true
+    },
+    "NANOU_KVM_TLS_PIN": {
+      "label": "NanoKVM TLS certificate fingerprint (SHA-256)",
+      "required": true
+    },
+    "NANOU_UU_NAME": {
+      "label": "UU device name",
+      "description": "Optional name displayed in UU Remote. Leave empty to keep the existing name."
+    },
+    "NANOU_AUTOSTART": {
+      "label": "Start NanoU at boot",
+      "description": "Enter true or false. Open NanoU once on the touchscreen after changing this setting.",
+      "default": "false"
+    },
+    "NANOU_AUDIO": {
+      "label": "Stream target audio",
+      "description": "Enter true or false. Requires NanoKVM Virtual Audio, MCP Service, and an MCP API key.",
+      "default": "false"
+    },
+    "NANOU_KVM_MCP_KEY": {
+      "label": "Local NanoKVM MCP API key for audio",
+      "secret": true
+    },
+    "NANOU_MOUSE_SENSITIVITY": {
+      "label": "Relative mouse sensitivity (%)",
+      "description": "25–400. Absolute pointer mode keeps its screen coordinates.",
+      "default": "100"
+    }
+  }
+}

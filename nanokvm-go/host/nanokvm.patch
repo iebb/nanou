@@ -1,0 +1,225 @@
+diff --git a/src/auth.rs b/src/auth.rs
+index f37fcb4..d9474c8 100644
+--- a/src/auth.rs
++++ b/src/auth.rs
+@@ -298,10 +298,19 @@ impl UUAuthClient {
+ 
+     /// Signed JSON POST; returns (HTTP status, decoded body).
+     pub async fn post_json(&self, path: &str, body: &serde_json::Value) -> Result<(u16, serde_json::Value), String> {
++        self.request_json(reqwest::Method::POST, path, body).await
++    }
++
++    pub async fn put_json(&self, path: &str, body: &serde_json::Value) -> Result<(u16, serde_json::Value), String> {
++        self.request_json(reqwest::Method::PUT, path, body).await
++    }
++
++    async fn request_json(&self, method: reqwest::Method, path: &str, body: &serde_json::Value) -> Result<(u16, serde_json::Value), String> {
+         let body_str = serde_json::to_string(body).map_err(|e| e.to_string())?;
+-        let resp = self.http.post(format!("{}{}", self.creds.api_base(), path))
+-            .headers(self.build_headers("POST", path, &body_str)).body(body_str)
+-            .send().await.map_err(|e| format!("HTTP post {path} failed: {}", transport_error(&e)))?;
++        let headers = self.build_headers(method.as_str(), path, &body_str);
++        let resp = self.http.request(method.clone(), format!("{}{}", self.creds.api_base(), path))
++            .headers(headers).body(body_str)
++            .send().await.map_err(|e| format!("HTTP {method} {path} failed: {}", transport_error(&e)))?;
+         let status = resp.status().as_u16();
+         let value = resp.json().await.unwrap_or(serde_json::Value::Null);
+         Ok((status, value))
+diff --git a/src/capture.rs b/src/capture.rs
+index 5e6e850..aba8338 100644
+--- a/src/capture.rs
++++ b/src/capture.rs
+@@ -90,6 +90,10 @@ impl ScreenCapture {
+     }
+     pub fn new() -> Result<Self, String> {
+         let backend=crate::desktop_backend::detect()?;
++        if crate::nanokvm::enabled() {
++            return Ok(Self { backend, init_error:None, portal:None, kms:None,
++                display:"nanokvm:direct".into(), width:1920, height:1080, buffer:Mutex::new(Vec::new()) });
++        }
+         if backend == crate::desktop_backend::DesktopBackend::Kms {
+             let kms=crate::kms::Capture::open()?;
+             let (width,height)=(kms.width,kms.height);
+@@ -174,6 +178,7 @@ static X11_USERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsiz
+ 
+ impl Drop for ScreenCapture {
+     fn drop(&mut self) {
++        if self.display == "nanokvm:direct" { return; }
+         if self.init_error.is_none() && self.backend==crate::desktop_backend::DesktopBackend::X11
+             && X11_USERS.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 { unsafe { x11_close() }; }
+     }
+diff --git a/src/login.rs b/src/login.rs
+index 7dc3587..305b04c 100644
+--- a/src/login.rs
++++ b/src/login.rs
+@@ -97,6 +97,9 @@ fn screen() -> String {
+ }
+ 
+ fn hostname() -> String {
++    if let Ok(name) = std::env::var("NANOU_UU_NAME") {
++        if !name.is_empty() { return name; }
++    }
+     let h = read("/proc/sys/kernel/hostname");
+     if h.is_empty() { "Linux".into() } else { h }
+ }
+@@ -356,6 +359,25 @@ pub(crate) async fn flow(ui: &LoginUi) -> Result<String, String> {
+             ui.qr(&rgba, edge);
+             ui.status(crate::i18n::s("等待扫码…","Waiting for scan…"), Tone::Info);
+         }
++        if let Some(path) = std::env::var_os("NANOU_LOGIN_QR_MATRIX") {
++            use std::io::Write;
++            use std::os::unix::fs::OpenOptionsExt;
++            let code = qrcode::QrCode::new(url.as_bytes()).map_err(|e| e.to_string())?;
++            let mut matrix = Vec::with_capacity(code.width() * (code.width() + 1));
++            for y in 0..code.width() {
++                for x in 0..code.width() {
++                    matrix.push(if code[(x, y)] == qrcode::Color::Dark { b'1' } else { b'0' });
++                }
++                matrix.push(b'\n');
++            }
++            let path = std::path::PathBuf::from(path);
++            let temp = path.with_extension("tmp");
++            let mut file = std::fs::OpenOptions::new()
++                .write(true).create(true).truncate(true).mode(0o600)
++                .open(&temp).map_err(|e| e.to_string())?;
++            file.write_all(&matrix).map_err(|e| e.to_string())?;
++            std::fs::rename(&temp, &path).map_err(|e| e.to_string())?;
++        }
+         if let Some(path)=std::env::var_os("UU_LOGIN_QR_PNG") {
+             use std::io::Write;
+             use std::os::unix::fs::OpenOptionsExt;
+diff --git a/src/main.rs b/src/main.rs
+index a7efef0..a2a8f48 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -31,6 +31,7 @@ mod port_mapping;
+ mod power;
+ mod signaling;
+ mod terminal;
++mod nanokvm;
+ mod webrtc;
+ mod video;
+ mod video_governor;
+@@ -659,8 +660,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+     session_ice::configure_relay_transport();
+     // Before host.pid, and before assist: a missing or failed assist session must still handle SIGUSR2.
+     let _ = install_host_signals(None);
+-    video::warm_auto_probe();
+-    video::check_ffmpeg_usable();
++    if !nanokvm::enabled() { video::warm_auto_probe(); video::check_ffmpeg_usable(); }
+ 
+     if !desktop_backend::headless() && desktop_backend::detect()? == desktop_backend::DesktopBackend::X11 && desktop_backend::wayland_session_running() {
+         // X11 capture inside a Wayland session reads XWayland's root window: all black, no error (#61).
+@@ -763,6 +763,7 @@ async fn serve(mut capture: Arc<ScreenCapture>, input: Arc<InputInjector>, shutd
+             }
+         };
+         let client = Arc::new(UUAuthClient::new(creds.clone()));
++        if nanokvm::enabled() { nanokvm::set_alias(&client, &creds.device_id).await; }
+         // Logged-in host: remote assistance (ID + code) alongside the device list, like the official
+         // client. Shown in a hidden window opened with `uuremote-server show`; UU_REMOTE_ASSIST=0 disables.
+         if std::env::var("UU_REMOTE_ASSIST").ok().as_deref() != Some("0") {
+@@ -1010,11 +1011,12 @@ async fn serve(mut capture: Arc<ScreenCapture>, input: Arc<InputInjector>, shutd
+                         let (capture_type,transport) = capture_types.remove(&ice).or_else(|| next_capture_type.take()).unwrap_or((1,crate::session_ice::SessionIce::default()));
+                         // CaptureType: 0 unknown, 1 desktop, 2 window; 5 file transfer, 8 terminal, 9 port mapping.
+                         let desktop = capture_type <= 2;
++                        if nanokvm::enabled() && !desktop { continue; }
+                         let controller = controller_by_ice.remove(&ice).unwrap_or(next_controller);
+                         if desktop { input.set_controller(controller); }
+                         log::info!("Offer for connection: capture_type={} desktop={} active_peers={}", capture_type, desktop, sessions.len());
+                         // An expired NVENC failure is re-probed in the background. This offer keeps the cached encoder.
+-                        if desktop { video::warm_auto_probe(); video::check_ffmpeg_usable(); }
++                        if desktop && !nanokvm::enabled() { video::warm_auto_probe(); video::check_ffmpeg_usable(); }
+                         // Replace only this ICE id or a previous desktop, never tool peers.
+                         for id in superseded_peer_ids(&sessions, &ice, desktop) {
+                             if let Some(old) = sessions.remove(&id) { close_peer(&old.pc).await; }
+diff --git a/src/video.rs b/src/video.rs
+index 32b692d..37c39be 100644
+--- a/src/video.rs
++++ b/src/video.rs
+@@ -1198,6 +1198,11 @@ pub async fn stream_desktop_at(pc: Arc<RTCPeerConnection>, track: Arc<crate::vid
+             && pc.sctp().state() == webrtc::sctp_transport::sctp_transport_state::RTCSctpTransportState::Connected { break; }
+         tokio::time::sleep(Duration::from_millis(100)).await;
+     }
++    if crate::nanokvm::enabled() {
++        if !track.supports(VideoCodec::H264) { return Err("UU viewer did not negotiate H.264".into()); }
++        applied.send_modify(|value| value.codec = VideoCodec::H264);
++        return crate::nanokvm::stream(pc, track).await;
++    }
+     // Portal power/idle policy belongs to its CONTROL-scoped supervisor,
+     // including when video has no frames or the user locks manually.
+     if portal.is_none() { keep_stream_display_awake(); }
+diff --git a/src/webrtc.rs b/src/webrtc.rs
+index 068558a..ccbf64d 100644
+--- a/src/webrtc.rs
++++ b/src/webrtc.rs
+@@ -350,6 +350,9 @@ impl WebRtcSession {
+                     if state==RTCPeerConnectionState::Connected {session.connected();}
+                     if matches!(state,RTCPeerConnectionState::Closed|RTCPeerConnectionState::Failed|RTCPeerConnectionState::Disconnected) {session.disconnected();}
+                 }
++                if crate::nanokvm::enabled() && matches!(state, RTCPeerConnectionState::Closed | RTCPeerConnectionState::Failed | RTCPeerConnectionState::Disconnected) {
++                    crate::nanokvm::reset();
++                }
+                 if state == RTCPeerConnectionState::Connected && !notified.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                     tokio::spawn(async move {
+                     let ctx = ctx.lock().await.clone();
+@@ -448,7 +451,9 @@ impl WebRtcSession {
+         });
+ 
+         // Desktop sound on the viewer's audio m-line (it always offers Opus).
+-        if desktop && crate::audio::enabled() && !cfg!(test) {
++        let embedded = crate::nanokvm::enabled();
++        let desktop_sound = desktop && if embedded { crate::nanokvm::audio_enabled() } else { crate::audio::enabled() };
++        if desktop_sound && !cfg!(test) {
+             let audio_track = Arc::new(TrackLocalStaticSample::new(
+                 RTCRtpCodecCapability { mime_type: "audio/opus".to_owned(), clock_rate: 48000, channels: 2, ..Default::default() },
+                 "audio_0".to_owned(), "audio_0".to_owned(),
+@@ -457,7 +462,11 @@ impl WebRtcSession {
+                 Ok(audio_sender) => {
+                     // Drain RTCP so the interceptors keep running.
+                     tokio::spawn(async move { let mut rtcp = [0u8; 1500]; while audio_sender.read(&mut rtcp).await.is_ok() {} });
+-                    tokio::spawn(crate::audio::stream_audio(pc.clone(), audio_track));
++                    if embedded {
++                        tokio::spawn(crate::nanokvm::stream_audio(pc.clone(), audio_track));
++                    } else {
++                        tokio::spawn(crate::audio::stream_audio(pc.clone(), audio_track));
++                    }
+                 }
+                 Err(e) => log::warn!("Add audio track failed: {}", e),
+             }
+@@ -470,7 +479,6 @@ impl WebRtcSession {
+         // Per-connection mute / lock-after-session settings (安全 menu).
+         let peer_actions = Arc::new(crate::system_actions::PeerActions::default());
+         let session_actions = peer_actions.clone();
+-        let desktop_sound = desktop && crate::audio::enabled();
+         if desktop && !cfg!(test) { track_session(pc.clone(), peer_actions.clone(), &role); }
+         // Live encoder switch (SIGUSR2) sends CaptureSettingSync when chroma is downgraded.
+         let (chroma_sync_tx, chroma_sync_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+@@ -580,6 +588,10 @@ impl WebRtcSession {
+             if label == "FILE_DATA_CHANNEL" { *file_channel.lock().unwrap() = Some(d.clone()); }
+ 
+             Box::pin(async move {
++                if crate::nanokvm::enabled() && !matches!(label.as_str(), "CONTROL_DATA_CHANNEL" | "TEXT_DATA_CHANNEL") {
++                    let _ = d.close().await;
++                    return;
++                }
+                 let lbl = label.clone();
+                 let inp = input_inst.clone();
+                 let d_reply = d.clone();
+@@ -1247,6 +1259,17 @@ impl WebRtcSession {
+                     let capture_requests = capture_tx.clone();
+ 
+                     Box::pin(async move {
++                        if crate::nanokvm::enabled() {
++                            if channel_name == "CONTROL_DATA_CHANNEL" {
++                                if let Ok(crate::control_protocol::ControlMessage::Input(event)) = crate::control_protocol::decode_control(&msg.data) {
++                                    crate::nanokvm::input(event);
++                                    return;
++                                }
++                            }
++                            if !is_capture_setting_message(&msg.data) && !crate::nanokvm::harmless_control(&msg.data) {
++                                return;
++                            }
++                        }
+                         // The privacy screen can swap the portal stream to a virtual output of another size.
+                         let input_size = crate::wayland::input_size(screen.portal.as_ref().map_or((screen.width, screen.height), |p| p.size()));
+                         // After a RandR resize the stream restarts capture at the new size; map the pointer to it.

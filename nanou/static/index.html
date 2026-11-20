@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NanoU · NanoKVM Remote</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="brand"><span class="mark" aria-hidden="true"></span> NanoU</div>
+      <div class="account">
+        <span id="account-status" class="pill">Checking account</span>
+        <button id="sign-out" class="quiet" hidden>Sign out</button>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="intro">
+      <h1>NanoKVM Remote</h1>
+      <p>Open your NanoKVM console through your UU account.</p>
+    </div>
+    <div class="layout">
+      <section class="panel primary" aria-label="UU connection">
+        <div id="login" hidden>
+          <h2>Sign in to UU</h2>
+          <p>Use the same account as your NanoU Gateway.</p>
+          <form id="login-form">
+            <label for="phone">Mobile number</label>
+            <div class="phone">
+              <span>+86</span>
+              <input id="phone" name="phone" type="tel" autocomplete="tel-national" inputmode="numeric"
+                     placeholder="11-digit mobile number" maxlength="11" pattern="[0-9]{11}" required>
+            </div>
+            <div id="code-fields" hidden>
+              <label for="code">Verification code</label>
+              <input id="code" name="code" autocomplete="one-time-code" inputmode="numeric"
+                     placeholder="Code from your SMS" maxlength="8" pattern="[0-9]{4,8}">
+            </div>
+            <div class="actions">
+              <button id="send-code" type="button">Send SMS code</button>
+              <button id="sign-in" type="submit" hidden>Sign in</button>
+            </div>
+          </form>
+        </div>
+        <div id="devices" hidden>
+          <div class="panel-heading">
+            <h2>Gateways</h2>
+            <button id="refresh" type="button" class="quiet">Refresh</button>
+          </div>
+          <p>Choose the computer running NanoU Gateway.</p>
+          <form id="connect-form">
+            <label for="device">UU device</label>
+            <select id="device" required>
+              <option value="">Refresh to find gateways</option>
+            </select>
+            <label for="scheme">Console protocol</label>
+            <select id="scheme">
+              <option value="http">HTTP</option>
+              <option value="https">HTTPS</option>
+            </select>
+            <p class="hint">Match the protocol shown on the gateway.</p>
+            <button id="connect" type="submit" disabled>Connect</button>
+          </form>
+        </div>
+        <div id="session" hidden>
+          <div class="panel-heading">
+            <h2 id="gateway-name">NanoU Gateway</h2>
+            <span class="pill online">Tunnel connected</span>
+          </div>
+          <p>Sign in to NanoKVM in the console tab to view and control the attached computer.</p>
+          <div class="actions">
+            <a id="console" class="button" target="_blank" rel="noopener noreferrer">Open NanoKVM ↗</a>
+            <button id="disconnect" class="quiet">Disconnect</button>
+          </div>
+        </div>
+        <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
+      </section>
+      <aside class="panel setup">
+        <h2>Gateway setup</h2>
+        <p>On a computer that can reach your NanoKVM, start the gateway with your device’s local address.</p>
+        <pre><code>uv run --locked python -m nanou gateway http://192.168.1.42</code></pre>
+        <p>Sign in on the gateway first, then return here to connect.</p>
+        <details>
+          <summary>Use the official UU app</summary>
+          <p>On a Linux bridge with the UU-compatible host installed, enroll with <code>python3 -m nanou native-login</code>, then run <code>python3 -m nanou native</code> with your NanoKVM address.</p>
+        </details>
+      </aside>
+    </div>
+  </main>
+</body>
+</html>
