@@ -68,7 +68,7 @@ class SpeakerSession:
         self.request("initialize", {
             "protocolVersion": "2025-06-18",
             "capabilities": {},
-            "clientInfo": {"name": "NanoU", "version": "0.3.0"},
+            "clientInfo": {"name": "NanoU", "version": "0.3.1"},
         })
         self.request("notifications/initialized", {}, notification=True)
         result = self.request("tools/call", {"name": "media_session_create", "arguments": {

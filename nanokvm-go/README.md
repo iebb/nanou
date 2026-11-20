@@ -26,7 +26,11 @@ Edit NanoU’s app configuration under **Settings → Apps → Installed**. The 
 
 Boot startup and audio default to off. Audio sends computer sound to the viewer. The touchscreen must be used for the first UU pairing even with boot startup enabled.
 
-NanoU forwards the firmware’s H.264 stream. The SDK settings currently expose no separate resolution, frame rate, or bitrate controls.
+NanoU forwards the firmware’s H.264 stream. Adjust resolution, frame rate, and bitrate in the NanoKVM video settings.
+
+## Video latency
+
+The relay keeps up to five frames queued and discards frames that have spent 175 ms in the relay. If sending falls behind, it resumes at a fresh H.264 keyframe. On a constrained connection, reduce the NanoKVM video bitrate. A shorter encoder keyframe interval can also reduce the pause after a dropped frame.
 
 ## Build
 

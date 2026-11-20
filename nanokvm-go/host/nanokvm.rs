@@ -5,12 +5,17 @@ use crate::protocol::{decode_wire, WireValue};
 use crate::video_track::VideoTrack;
 use std::os::unix::net::UnixDatagram;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;
+use tokio::sync::Notify;
 use webrtc::media::Sample;
 use webrtc::peer_connection::{peer_connection_state::RTCPeerConnectionState, RTCPeerConnection};
+
+#[path = "low_latency.rs"]
+mod low_latency;
+use low_latency::{Frame, VideoBuffer, MAX_AGE};
 
 pub fn enabled() -> bool {
     std::env::var_os("NANOU_DEVICE_SOCKET_DIR").is_some()
@@ -22,9 +27,14 @@ fn socket(name: &str) -> Option<PathBuf> {
 
 fn send(value: serde_json::Value) {
     let Some(path) = socket("input") else { return };
-    // Datagram boundaries preserve one event per report. Avoid blocking the UU callback.
-    if let Ok(sender) = UnixDatagram::unbound() {
-        let _ = sender.set_nonblocking(true);
+    // Reuse the datagram socket for high-rate pointer input. Keep the UU callback nonblocking.
+    static SENDER: OnceLock<Option<UnixDatagram>> = OnceLock::new();
+    let sender = SENDER.get_or_init(|| {
+        let sender = UnixDatagram::unbound().ok()?;
+        sender.set_nonblocking(true).ok()?;
+        Some(sender)
+    });
+    if let Some(sender) = sender {
         let _ = sender.send_to(value.to_string().as_bytes(), path);
     }
 }
@@ -76,24 +86,60 @@ async fn read_frame(stream: &mut UnixStream) -> Result<Vec<u8>, String> {
 pub async fn stream(pc: Arc<RTCPeerConnection>, track: Arc<VideoTrack>) -> Result<(), String> {
     let path = socket("video").ok_or("NanoKVM media socket is not configured")?;
     let mut connection = UnixStream::connect(path).await.map_err(|e| e.to_string())?;
-    let mut previous_pts: Option<u64> = None;
-    let mut have_keyframe = false;
-    let extensions = [crate::rtp_metadata::capture_index(0), crate::rtp_metadata::new_frame()];
-    while !matches!(pc.connection_state(), RTCPeerConnectionState::Closed | RTCPeerConnectionState::Failed) {
-        let packet = tokio::time::timeout(Duration::from_secs(8), read_frame(&mut connection))
-            .await.map_err(|_| "Timed out waiting for NanoKVM H.264 video")??;
-        have_keyframe |= packet[0] == 1;
-        if !have_keyframe { continue; }
-        let pts = u64::from_le_bytes(packet[1..9].try_into().unwrap());
-        let delta = previous_pts.and_then(|previous| pts.checked_sub(previous))
-            .filter(|delta| (1_000..=250_000).contains(delta)).unwrap_or(33_333);
-        previous_pts = Some(pts);
-        let access_unit = packet[9..].to_vec().into();
-        let sample = Sample { data: access_unit, duration: Duration::from_micros(delta), ..Default::default() };
-        track.write_sample_with_extensions(VideoCodec::H264, &sample, &extensions)
-            .await.map_err(|e| e.to_string())?;
+    let buffer = Mutex::new(VideoBuffer::new());
+    let ready = Notify::new();
+
+    // The firmware feed must keep draining even when UU's transport slows down.
+    let read = async {
+        let mut previous_pts: Option<u64> = None;
+        loop {
+            let packet = tokio::time::timeout(Duration::from_secs(8), read_frame(&mut connection))
+                .await.map_err(|_| "Timed out waiting for NanoKVM H.264 video")??;
+            let pts = u64::from_le_bytes(packet[1..9].try_into().unwrap());
+            let delta = previous_pts.and_then(|previous| pts.checked_sub(previous))
+                .filter(|delta| (1_000..=250_000).contains(delta)).unwrap_or(33_333);
+            previous_pts = Some(pts);
+            let frame = Frame { packet, arrived: Instant::now(), duration: Duration::from_micros(delta) };
+            if buffer.lock().unwrap().push(frame) {
+                ready.notify_one();
+            }
+        }
+    };
+
+    let write = async {
+        let extensions = [crate::rtp_metadata::capture_index(0), crate::rtp_metadata::new_frame()];
+        loop {
+            let frame = buffer.lock().unwrap().pop(Instant::now());
+            let Some(frame) = frame else {
+                ready.notified().await;
+                continue;
+            };
+            let sample = Sample {
+                data: bytes::Bytes::from(frame.packet).slice(9..),
+                duration: frame.duration,
+                ..Default::default()
+            };
+            let deadline = tokio::time::Instant::from_std(frame.arrived + MAX_AGE);
+            let send = track.write_sample_with_extensions(VideoCodec::H264, &sample, &extensions);
+            match tokio::time::timeout_at(deadline, send).await {
+                Ok(result) => result.map_err(|e| e.to_string())?,
+                Err(_) => buffer.lock().unwrap().skip_to_keyframe(Instant::now()),
+            }
+        }
+    };
+
+    let wait_for_close = async {
+        while !peer_ended(&pc) {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        Ok(())
+    };
+
+    tokio::select! {
+        result = read => result,
+        result = write => result,
+        result = wait_for_close => result,
     }
-    Ok(())
 }
 
 pub async fn set_alias(client: &crate::auth::UUAuthClient, device_id: &str) {
