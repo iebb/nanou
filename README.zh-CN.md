@@ -8,7 +8,39 @@ NanoU 可通过官方 UU 远程客户端或 NanoU 浏览器控制端远程操作
 
 [NanoKVM Go 版](nanokvm-go/README.zh-CN.md)是一个 ARMv7 SDK 应用，可将设备的 H.264 视频发送给官方 UU 远程客户端，并转发键盘和鼠标输入。
 
-## 通过 Linux 桥接使用官方 UU 远程
+## 使用无需浏览器的 Linux 桥接
+
+桥接程序以普通 Linux 进程运行。它沿用设备端应用的固件接口，直接转发 NanoKVM Go 硬件编码的 H.264 视频，并发送键盘、鼠标输入。控制端使用官方 UU 远程客户端。Linux 主机需为 x86-64 或 ARM64，安装 Python 3.10 或以上版本，并能访问 KVM 和 UU 服务。
+
+1. 安装 Docker、Git、带 pip 的 Python、tar 和 unzip，然后为 Linux 主机构建安装包。
+
+   ```sh
+   sh nanokvm-go/build.sh --linux amd64
+   tar -xzf nanokvm-go/NanoU-linux-amd64.tar.gz
+   cd NanoU-linux-amd64
+   ```
+
+   ARM64 主机请将命令中的 `amd64` 替换为 `arm64`。
+
+2. 以普通 Linux 用户运行绑定命令，用官方 UU 远程手机端扫描终端中的二维码。
+
+   ```sh
+   ./nanou-bridge login --name "NanoKVM Go"
+   ```
+
+   可复用 `~/.nanou/native-uu.json` 中已有的 Linux 桥接绑定。请先停止旧桥接程序，再启动直连桥接。
+
+3. 填写设备的 HTTPS 地址和已验证的 TLS 证书指纹。按提示输入本机 KVM 密码，然后从官方 UU 远程客户端打开已绑定的设备。
+
+   ```sh
+   ./nanou-bridge run https://192.168.1.42 --tls-pin YOUR_VERIFIED_SHA256_FINGERPRINT
+   ```
+
+   本机 KVM 账号不是 `admin` 时，使用 `--username`。无人值守运行可通过环境变量 `NANOU_KVM_PASSWORD` 和 `NANOU_KVM_TLS_PIN` 提供配置。用 `--mouse-sensitivity` 设置相对鼠标灵敏度百分比。使用 `--audio` 时，请先在 KVM 启用虚拟音频和 MCP 服务，再通过 `NANOU_KVM_MCP_KEY` 提供密钥。
+
+在项目目录中，`python3 -m nanou native-login --bundle /path/to/NanoU-linux-amd64` 与 `python3 -m nanou native --bundle /path/to/NanoU-linux-amd64 …` 会调用同一个程序。直连桥接使用 NanoKVM Go 固件的 H.264 和 HID 接口。
+
+### Chromium 兼容模式
 
 NanoU 在 Linux 的虚拟显示器中用 Chromium 打开 NanoKVM 控制台，再由 [VallierDev 的 UU 兼容主机程序](https://github.com/VallierDev/uu-remote-linux)将画面发送到官方客户端。键盘和鼠标输入沿相反方向传递。
 
@@ -18,13 +50,13 @@ NanoU 在 Linux 的虚拟显示器中用 Chromium 打开 NanoKVM 控制台，再
 2. 在 Linux 桥接主机的项目目录运行以下命令，用准备控制设备的 UU 账号在官方手机端扫码绑定。
 
    ```sh
-   python3 -m nanou native-login
+   python3 -m nanou native-login --kiosk
    ```
 
 3. 以普通 Linux 用户启动桥接服务，将示例地址替换为桥接主机可访问的 NanoKVM 实际地址。
 
    ```sh
-   python3 -m nanou native http://192.168.1.42
+   python3 -m nanou native --kiosk http://192.168.1.42
    ```
 
 4. 在电脑或手机的官方 UU 客户端设备列表中选择在线的 Linux 主机，打开远程桌面，并在画面中的网页上登录 NanoKVM。按 Ctrl+C 可停止桥接服务。

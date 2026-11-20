@@ -8,7 +8,39 @@ NanoU provides remote access to Sipeed NanoKVM devices through the official UU R
 
 The [NanoKVM Go port](nanokvm-go/README.md) provides an ARMv7 SDK app that sends the device’s H.264 video and handles input from the official UU Remote app.
 
-## Control NanoKVM from the official UU Remote app using a Linux bridge
+## Use the browserless Linux bridge
+
+The bridge runs a patched UU host as a regular Linux process. It forwards the NanoKVM Go’s hardware-encoded H.264 stream and sends keyboard and mouse input through the same firmware interface as the on-device app. The viewer is the official UU Remote app. Use a Linux x86-64 or ARM64 host with Python 3.10+ and network access to the KVM and UU services.
+
+1. With Docker, Git, Python with pip, tar, and unzip installed, build the bundle for your Linux host.
+
+   ```sh
+   sh nanokvm-go/build.sh --linux amd64
+   tar -xzf nanokvm-go/NanoU-linux-amd64.tar.gz
+   cd NanoU-linux-amd64
+   ```
+
+   Use `arm64` in place of `amd64` for an ARM64 host.
+
+2. As a regular user on the Linux host, pair it with your UU account. Scan the terminal QR code with the official UU Remote mobile app.
+
+   ```sh
+   ./nanou-bridge login --name "NanoKVM Go"
+   ```
+
+   Existing Linux bridge pairings under `~/.nanou/native-uu.json` can be reused. Stop the old bridge before starting the direct bridge.
+
+3. Start the bridge with your KVM’s HTTPS URL and verified TLS certificate fingerprint. NanoU prompts for the local KVM password. Open the paired device in the official UU app.
+
+   ```sh
+   ./nanou-bridge run https://192.168.1.42 --tls-pin YOUR_VERIFIED_SHA256_FINGERPRINT
+   ```
+
+   Use `--username` when the local KVM account is named something other than `admin`. For unattended operation, the bridge reads `NANOU_KVM_PASSWORD` and `NANOU_KVM_TLS_PIN` from the environment. `--mouse-sensitivity` sets the relative pointer scale in percent. `--audio` uses `NANOU_KVM_MCP_KEY` with Virtual Audio and MCP Service enabled on the KVM.
+
+From a checkout, `python3 -m nanou native-login --bundle /path/to/NanoU-linux-amd64` and `python3 -m nanou native --bundle /path/to/NanoU-linux-amd64 …` call the same launcher. The direct bridge targets the NanoKVM Go firmware’s direct H.264 and HID endpoints.
+
+### Chromium fallback
 
 The official app connects to [VallierDev’s UU-compatible Linux host](https://github.com/VallierDev/uu-remote-linux). NanoU starts that host on a private virtual display with the NanoKVM web console open in Chromium. Video travels from NanoKVM to Chromium and then through UU Remote. Keyboard and mouse input follow the reverse path.
 
@@ -18,13 +50,13 @@ Use a dedicated Linux machine or VM that can open the NanoKVM URL and reach UU�
 2. On the Linux bridge, from this project directory, enroll with a QR code. Scan it in the official UU mobile app using the account you will control the device from.
 
    ```sh
-   python3 -m nanou native-login
+   python3 -m nanou native-login --kiosk
    ```
 
 3. Start the bridge as a regular Linux user. Replace the example with the same NanoKVM URL that works from that machine.
 
    ```sh
-   python3 -m nanou native http://192.168.1.42
+   python3 -m nanou native --kiosk http://192.168.1.42
    ```
 
 4. Open the official UU app on your phone or computer. Once the Linux host appears online under your devices, open its **Remote Desktop** and sign in to NanoKVM on the displayed page. Press Ctrl+C on the bridge to stop it.

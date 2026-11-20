@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 import websocket
 
-from bridge import FirmwareError, firmware_tls
+from bridge import FirmwareError
 
 MAX_SIGNAL = 128 * 1024
 MEDIA_TTL = 600
@@ -36,9 +36,9 @@ class SpeakerSession:
         }
         if self.session:
             headers["Mcp-Session-Id"] = self.session
-        conn = http.client.HTTPSConnection(self.firmware.host, timeout=4)
+        conn = http.client.HTTPSConnection(self.firmware.host, self.firmware.port, timeout=4)
         with closing(conn):
-            conn.sock = firmware_tls(self.firmware.host, self.firmware.pin)
+            conn.sock = self.firmware.tls()
             conn.request("POST", "/api/mcp", json.dumps(body), headers)
             response = conn.getresponse()
             if response.status not in {200, 202, 204}:

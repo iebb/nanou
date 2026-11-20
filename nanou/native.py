@@ -53,7 +53,7 @@ def launch(args):
 
         destination = Destination.from_url(args.url)
         if not Path(env["UU_CONFIG"]).is_file():
-            raise ValueError("Run python3 -m nanou native-login first.")
+            raise ValueError("Run python3 -m nanou native-login --kiosk first.")
         xvfb_run = require_program("xvfb-run")
         require_program("Xvfb")
         require_program("xauth")

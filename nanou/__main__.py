@@ -6,6 +6,7 @@ import getpass
 import os
 import sys
 import webbrowser
+from pathlib import Path
 
 from .config import Destination, state_directory
 
@@ -84,6 +85,35 @@ async def run_gateway(destination, name):
             await client.close()
 
 
+def launch_direct(args):
+    bundle = args.bundle or os.environ.get("NANOU_LINUX_BUNDLE")
+    if not bundle:
+        print("Set --bundle to the extracted Linux bridge directory.", file=sys.stderr)
+        return 1
+    launcher = Path(bundle).expanduser().resolve() / "nanou-bridge"
+    if not launcher.is_file():
+        print("NanoU bridge launcher is missing from the bundle directory.", file=sys.stderr)
+        return 1
+    command = [sys.executable, str(launcher)]
+    if args.role == "native-login":
+        command.append("login")
+    else:
+        command.extend(("run", args.url))
+        for flag in ("tls_pin", "username", "mouse_sensitivity"):
+            value = getattr(args, flag)
+            if value is not None:
+                command.extend(("--" + flag.replace("_", "-"), value))
+        if args.audio:
+            command.append("--audio")
+    if args.name is not None:
+        command.extend(("--name", args.name))
+    try:
+        os.execv(sys.executable, command)
+    except OSError as error:
+        print(f"NanoU: {error}", file=sys.stderr)
+        return 1
+
+
 def main():
     parser = argparse.ArgumentParser(prog="NanoU", description="Open a NanoKVM console over a UU tunnel.")
     commands = parser.add_subparsers(dest="role")
@@ -92,15 +122,25 @@ def main():
     gateway = commands.add_parser("gateway", help="Run beside the NanoKVM.")
     gateway.add_argument("url", help="NanoKVM base URL as seen from this host.")
     gateway.add_argument("--name", help="UU device name for this gateway.")
-    native = commands.add_parser("native", help="Stream NanoKVM to the official UU app from Linux.")
+    native = commands.add_parser("native", help="Stream directly to the UU app from Linux.")
     native.add_argument("url", help="NanoKVM base URL as seen from this host.")
-    commands.add_parser("native-login", help="Enroll the Linux UU host by scanning a QR code.")
+    native.add_argument("--tls-pin", help="Verified SHA-256 certificate fingerprint.")
+    native.add_argument("--username", help="Local NanoKVM username.")
+    native.add_argument("--mouse-sensitivity", help="Relative motion scale in percent.")
+    native.add_argument("--audio", action="store_true", help="Forward target audio.")
+    login = commands.add_parser("native-login", help="Enroll the Linux UU host by scanning a QR code.")
+    for command in (native, login):
+        command.add_argument("--bundle", help="Path to the extracted browserless Linux bridge.")
+        command.add_argument("--name", help="Device name shown in UU Remote.")
+        command.add_argument("--kiosk", action="store_true", help="Use the Chromium fallback.")
     args = parser.parse_args()
     role = args.role or "controller"
     if role in {"native", "native-login"}:
-        from .native import launch
+        if args.kiosk:
+            from .native import launch
 
-        return launch(args)
+            return launch(args)
+        return launch_direct(args)
     try:
         from uu_tunnel.api import UuApiError
         from uu_tunnel.webrtc import TunnelSessionError

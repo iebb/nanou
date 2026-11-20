@@ -13,6 +13,13 @@ def enabled_setting(values, key, label):
     raise ValueError(f"{label} must be true or false")
 
 
+def device_name(value):
+    name = value.strip()
+    if len(name) > 32 or any(unicodedata.category(c).startswith("C") for c in name):
+        raise ValueError("UU name must be 32 visible characters or fewer")
+    return name
+
+
 @dataclass(frozen=True)
 class Settings:
     username: str
@@ -26,9 +33,6 @@ class Settings:
 
     @classmethod
     def from_env(cls, values):
-        name = values.get("NANOU_UU_NAME", "").strip()
-        if len(name) > 32 or any(unicodedata.category(c).startswith("C") for c in name):
-            raise ValueError("UU name must be 32 visible characters or fewer")
         try:
             sensitivity = int(values.get("NANOU_MOUSE_SENSITIVITY", "100"))
         except ValueError:
@@ -43,7 +47,7 @@ class Settings:
             username=username,
             password=password,
             tls_pin=values.get("NANOU_KVM_TLS_PIN", ""),
-            name=name,
+            name=device_name(values.get("NANOU_UU_NAME", "")),
             autostart=enabled_setting(values, "NANOU_AUTOSTART", "Boot startup"),
             audio=enabled_setting(values, "NANOU_AUDIO", "Audio"),
             mcp_key=values.get("NANOU_KVM_MCP_KEY", "").strip(),

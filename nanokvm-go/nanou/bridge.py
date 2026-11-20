@@ -1,4 +1,4 @@
-"""Connect NanoU's private Unix sockets to the local NanoKVM Go firmware."""
+"""Connect NanoU's private Unix sockets to the NanoKVM Go firmware."""
 
 import hashlib
 import hmac
@@ -23,12 +23,12 @@ class FirmwareError(RuntimeError):
     pass
 
 
-def firmware_tls(host, pin, raw=None):
+def firmware_tls(host, pin, raw=None, *, port=PORT):
     # Go uses a self-signed leaf. Check its fingerprint before any HTTP data is sent.
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
-    tcp = raw or socket.create_connection((host, PORT), timeout=TIMEOUT)
+    tcp = raw or socket.create_connection((host, port), timeout=TIMEOUT)
     try:
         connection = context.wrap_socket(tcp, server_hostname=host)
         actual = hashlib.sha256(connection.getpeercert(binary_form=True)).hexdigest()
@@ -42,18 +42,24 @@ def firmware_tls(host, pin, raw=None):
 
 
 class Firmware:
-    def __init__(self, pin, host="127.0.0.1"):
+    def __init__(self, pin, host="127.0.0.1", port=PORT):
         self.host = host
+        self.port = port
+        address = f"[{host}]" if ":" in host else host
+        self.authority = address if port == PORT else f"{address}:{port}"
         self.pin = pin.strip().lower().replace(":", "")
         if len(self.pin) != 64 or any(value not in "0123456789abcdef" for value in self.pin):
-            raise FirmwareError("Enter the KVM TLS fingerprint in Apps settings.")
+            raise FirmwareError("Enter the SHA-256 fingerprint of the KVM TLS certificate.")
         self.cookie = ""
 
+    def tls(self):
+        return firmware_tls(self.host, self.pin, port=self.port)
+
     def post(self, path, body):
-        conn = http.client.HTTPSConnection(self.host, PORT, timeout=TIMEOUT)
+        conn = http.client.HTTPSConnection(self.host, self.port, timeout=TIMEOUT)
         with closing(conn):
-            conn.sock = firmware_tls(self.host, self.pin)
-            headers = {"Content-Type": "application/json", "Origin": f"https://{self.host}"}
+            conn.sock = self.tls()
+            headers = {"Content-Type": "application/json", "Origin": f"https://{self.authority}"}
             if self.cookie:
                 headers["Cookie"] = self.cookie
             conn.request("POST", path, json.dumps(body), headers)
@@ -76,13 +82,13 @@ class Firmware:
             raise FirmwareError("The KVM did not issue a session. Check if two-factor login is required.")
 
     def ws(self, path):
-        peer = firmware_tls(self.host, self.pin)
+        peer = self.tls()
         try:
             return websocket.create_connection(
-                f"wss://{self.host}{path}",
+                f"wss://{self.authority}{path}",
                 socket=peer,
                 cookie=self.cookie,
-                origin=f"https://{self.host}",
+                origin=f"https://{self.authority}",
                 timeout=TIMEOUT,
                 redirect_limit=0,
                 enable_multithread=True,
