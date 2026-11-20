@@ -44,6 +44,8 @@ From a checkout, `python3 -m nanou native-login --bundle /path/to/NanoU-linux-am
 
 If an iPhone is the target plugged into NanoKVM Go, enable AssistiveTouch on that phone. Start the direct Linux bridge with `--iphone-drag-repair` to run the repair before the first mouse input after reconnecting. In UU Remote, use Mouse Pointer mode.
 
+For a target that supports a USB touchscreen, use `--click-to-touch` to translate primary clicks and drags into one-finger contacts. Select **Multi-touch Screen** in the NanoKVM web console and **Screen Touch** in UU Remote with **Tablet Touch Mode** off.
+
 To keep the official UU Remote app visible, set **Settings → Display & Brightness → Auto-Lock → Never** if that option is available. The host cannot change the phone’s Auto-Lock setting.
 
 If you lock and unlock the device, return to UU Remote. The direct bridge can restart video from a fresh H.264 keyframe when the connection recovers. If UU has ended the session, open the paired device again.

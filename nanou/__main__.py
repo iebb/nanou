@@ -107,6 +107,8 @@ def launch_direct(args):
             command.append("--audio")
         if args.iphone_drag_repair:
             command.append("--iphone-drag-repair")
+        if args.click_to_touch:
+            command.append("--click-to-touch")
     if args.name is not None:
         command.extend(("--name", args.name))
     try:
@@ -131,6 +133,7 @@ def main():
     native.add_argument("--mouse-sensitivity", help="Relative motion scale in percent.")
     native.add_argument("--audio", action="store_true", help="Forward target audio.")
     native.add_argument("--iphone-drag-repair", action="store_true", help="Repair input on an attached iPhone.")
+    native.add_argument("--click-to-touch", action="store_true", help="Send touchscreen taps and drags.")
     login = commands.add_parser("native-login", help="Enroll the Linux UU host by scanning a QR code.")
     for command in (native, login):
         command.add_argument("--bundle", help="Path to the extracted browserless Linux bridge.")

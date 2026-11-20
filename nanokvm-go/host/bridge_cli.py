@@ -43,6 +43,7 @@ def parser():
     run.add_argument("--name", help="Device name shown in UU Remote")
     run.add_argument("--mouse-sensitivity", help="Relative motion scale in percent")
     run.add_argument("--iphone-drag-repair", action="store_true", help="Repair touch-as-mouse input on an attached iPhone")
+    run.add_argument("--click-to-touch", action="store_true", help="Send touchscreen taps and drags from absolute pointer input")
     run.add_argument("--audio", action="store_true", help="Forward KVM audio using NANOU_KVM_MCP_KEY")
     return cli
 
@@ -64,6 +65,8 @@ def settings_from_args(args):
         config["NANOU_AUDIO"] = "true"
     if args.iphone_drag_repair:
         config["NANOU_IPHONE_DRAG_REPAIR"] = "true"
+    if args.click_to_touch:
+        config["NANOU_CLICK_TO_TOUCH"] = "true"
     if not config.get("NANOU_KVM_PASSWORD"):
         if not sys.stdin.isatty():
             raise ValueError("Set NANOU_KVM_PASSWORD or run with a terminal to enter it")

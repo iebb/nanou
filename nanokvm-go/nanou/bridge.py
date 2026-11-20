@@ -24,6 +24,7 @@ VIDEO_PROBLEMS = {
     "-5": "NanoKVM video capture is disabled",
 }
 POINTER_EVENTS = {"absolute", "relative", "button", "button_click", "scroll"}
+MIN_TOUCH_SECONDS = 0.035
 
 
 class FirmwareError(RuntimeError):
@@ -152,7 +153,7 @@ def signed_word(value):
 
 
 class HID:
-    def __init__(self, peer, sensitivity=100):
+    def __init__(self, peer, sensitivity=100, *, click_to_touch=False):
         self.peer = peer
         self.sequence = 0
         self.modifier = 0
@@ -162,6 +163,8 @@ class HID:
         self.scroll_remainder = 0
         self.sensitivity = sensitivity
         self.motion_remainder = [0, 0]
+        self.click_to_touch = click_to_touch
+        self.touch_started = None
 
     def emit(self, source, kind, payload):
         self.sequence = (self.sequence + 1) & 0xFFFFFFFF
@@ -191,12 +194,15 @@ class HID:
             self.emit(2, 2, struct.pack("<Bhhh", self.buttons, signed_word(x), signed_word(y), wheel))
 
     def reset(self):
+        if self.touch_started is not None:
+            self.touch_contact(False)
         self.modifier = self.buttons = 0
         self.keys.clear()
         self.scroll_remainder = 0
         self.motion_remainder = [0, 0]
         self.keyboard()
-        self.pointer()
+        if not self.click_to_touch:
+            self.pointer()
         self.absolute = None
 
     def repair_iphone_drag(self):
@@ -206,9 +212,46 @@ class HID:
         time.sleep(0.030)
         self.emit(virtual_pointer, 3, struct.pack("<BHHh", 0, 32768, 32768, -1))
 
+    def touch_contact(self, down):
+        if self.absolute is None:
+            return
+        # One virtual touchscreen contact, matching the firmware's touch report.
+        flags, pressure = (3, 255) if down else (2, 0)
+        self.emit(19, 5, struct.pack("<BBBHHBB", 1, 1, flags, *self.absolute, pressure, 0))
+        if not down:
+            self.emit(19, 5, b"\0")
+            self.touch_started = None
+        elif self.touch_started is None:
+            self.touch_started = time.monotonic()
+
+    def finish_touch(self):
+        if self.touch_started is not None:
+            remaining = MIN_TOUCH_SECONDS - (time.monotonic() - self.touch_started)
+            if remaining > 0:
+                time.sleep(remaining)
+            self.touch_contact(False)
+
+    def touch_pointer(self, report, kind):
+        if kind == "absolute":
+            self.absolute = tuple(round(max(0, min(1, report[key])) * 65535) for key in ("x", "y"))
+        elif kind == "button" and report["button"] == 1:
+            self.buttons = int(report["down"])
+        elif kind == "button_click" and report["button"] == 1 and not self.buttons and self.absolute is not None:
+            self.touch_contact(True)
+            self.finish_touch()
+            return
+        else:
+            return
+        if self.buttons:
+            self.touch_contact(True)
+        else:
+            self.finish_touch()
+
     def event(self, report, firmware):
         kind = report["event"]
-        if kind == "key":
+        if self.click_to_touch and kind in POINTER_EVENTS:
+            self.touch_pointer(report, kind)
+        elif kind == "key":
             self.key(report["key"], report["down"])
         elif kind == "key_click":
             self.key(report["key"], True)
@@ -252,12 +295,14 @@ class HID:
 
 
 class Bridge:
-    def __init__(self, firmware, directory, status, sensitivity=100, audio_key="", *, iphone_drag_repair=False):
+    def __init__(self, firmware, directory, status, sensitivity=100, audio_key="", *,
+                 iphone_drag_repair=False, click_to_touch=False):
         self.firmware = firmware
         self.directory = directory
         self.status = status
         self.sensitivity = sensitivity
-        self.iphone_drag_repair = iphone_drag_repair
+        self.iphone_drag_repair = iphone_drag_repair and not click_to_touch
+        self.click_to_touch = click_to_touch
         self.iphone_video_recovered = threading.Event()
         self.stopping = threading.Event()
         self.video = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -387,7 +432,7 @@ class Bridge:
                         if kind == "reset":
                             continue
                         peer = self.firmware.ws("/api/ws")
-                        hid = HID(peer, self.sensitivity)
+                        hid = HID(peer, self.sensitivity, click_to_touch=self.click_to_touch)
                         heartbeat_at = time.monotonic() + 10
                         repair_pending = self.iphone_drag_repair
                     if (kind in POINTER_EVENTS and not hid.buttons

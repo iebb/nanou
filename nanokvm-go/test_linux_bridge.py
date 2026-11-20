@@ -21,7 +21,7 @@ from websocket import WebSocketTimeoutException
 sys.path.insert(0, str(Path(__file__).with_name("nanou")))
 sys.path.insert(0, str(Path(__file__).with_name("host")))
 
-from bridge import Bridge, Firmware, FirmwareError
+from bridge import Bridge, Firmware, FirmwareError, HID
 from bridge_cli import target
 from runtime import HostRuntime, run_host
 from settings import Settings
@@ -89,7 +89,7 @@ class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
         receiver.recv.side_effect = reports()
         bridge = SimpleNamespace(
             input=receiver, stopping=threading.Event(), firmware=firmware,
-            status=Mock(), sensitivity=100, iphone_drag_repair=False,
+            status=Mock(), sensitivity=100, iphone_drag_repair=False, click_to_touch=False,
             iphone_video_recovered=threading.Event(),
         )
         with patch("bridge.time", clock):
@@ -117,7 +117,7 @@ class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
         receiver.recv.side_effect = reports()
         bridge = SimpleNamespace(
             input=receiver, stopping=threading.Event(), firmware=Mock(),
-            status=Mock(), sensitivity=100, iphone_drag_repair=True,
+            status=Mock(), sensitivity=100, iphone_drag_repair=True, click_to_touch=False,
             iphone_video_recovered=video_recovered,
         )
         bridge.firmware.ws.side_effect = [first, second]
@@ -132,6 +132,37 @@ class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(packet[3] == 3 for packet in packets[:len(expected)]))
             self.assertEqual(decoded, expected)
         self.assertEqual([call.args for call in delay.call_args_list], [(0.030,)] * 3)
+
+    def test_touchscreen_tap_drag_and_reset(self):
+        peer = Mock()
+        hid = HID(peer, click_to_touch=True)
+        click = {"event": "button_click", "button": 1}
+        start = {"event": "absolute", "x": 0.25, "y": 0.75}
+        moved = {"event": "absolute", "x": 0.5, "y": 0.5}
+        down = {"event": "button", "button": 1, "down": True}
+
+        hid.event(click, None)
+        hid.event(start, None)
+        peer.send_binary.assert_not_called()
+        with patch("bridge.time.sleep") as delay:
+            hid.event(click, None)
+        delay.assert_called_once()
+        hid.event(down, None)
+        hid.event(moved, None)
+        hid.reset()
+
+        packets = [entry.args[0] for entry in peer.send_binary.call_args_list]
+        self.assertEqual([packet[2:4] for packet in packets], [b"\x13\x05"] * 7 + [b"\x01\x01"])
+        reports = [struct.unpack("<BBBHHBB", packet[13:]) if len(packet) > 14 else None for packet in packets[:-1]]
+        self.assertEqual(reports, [
+            (1, 1, 3, 16384, 49151, 255, 0),
+            (1, 1, 2, 16384, 49151, 0, 0),
+            None,
+            (1, 1, 3, 16384, 49151, 255, 0),
+            (1, 1, 3, 32768, 32768, 255, 0),
+            (1, 1, 2, 32768, 32768, 0, 0),
+            None,
+        ])
 
     def test_https_urls_and_port(self):
         self.assertEqual(target("https://kvm.example:9443/"), ("kvm.example", 9443))

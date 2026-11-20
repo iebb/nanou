@@ -31,6 +31,7 @@ class Settings:
     mcp_key: str = field(repr=False)
     sensitivity: int
     iphone_drag_repair: bool = False
+    click_to_touch: bool = False
 
     @classmethod
     def from_env(cls, values):
@@ -54,4 +55,5 @@ class Settings:
             mcp_key=values.get("NANOU_KVM_MCP_KEY", "").strip(),
             sensitivity=sensitivity,
             iphone_drag_repair=enabled_setting(values, "NANOU_IPHONE_DRAG_REPAIR", "Repair iPhone drag"),
+            click_to_touch=enabled_setting(values, "NANOU_CLICK_TO_TOUCH", "Click to touch"),
         )
