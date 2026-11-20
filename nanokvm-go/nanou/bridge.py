@@ -17,6 +17,12 @@ import websocket
 PORT = 443
 MAX_FRAME = 8 * 1024 * 1024
 TIMEOUT = 4
+VIDEO_PROBLEMS = {
+    "-1": "No video signal from the attached computer",
+    "-2": "NanoKVM video encoder error",
+    "-4": "NanoKVM video mode changed",
+    "-5": "NanoKVM video capture is disabled",
+}
 
 
 class FirmwareError(RuntimeError):
@@ -51,16 +57,18 @@ class Firmware:
         if len(self.pin) != 64 or any(value not in "0123456789abcdef" for value in self.pin):
             raise FirmwareError("Enter the SHA-256 fingerprint of the KVM TLS certificate.")
         self.cookie = ""
+        self._credentials = None
+        self._login_lock = threading.Lock()
 
     def tls(self):
         return firmware_tls(self.host, self.pin, port=self.port)
 
-    def post(self, path, body):
+    def post(self, path, body, *, use_cookie=True):
         conn = http.client.HTTPSConnection(self.host, self.port, timeout=TIMEOUT)
         with closing(conn):
             conn.sock = self.tls()
             headers = {"Content-Type": "application/json", "Origin": f"https://{self.authority}"}
-            if self.cookie:
+            if use_cookie and self.cookie:
                 headers["Cookie"] = self.cookie
             conn.request("POST", path, json.dumps(body), headers)
             response = conn.getresponse()
@@ -73,21 +81,41 @@ class Firmware:
             for name, value in response.getheaders():
                 if name.lower() == "set-cookie":
                     cookies.load(value)
-            if cookies:
+            if cookies or not use_cookie:
                 self.cookie = "; ".join(morsel.OutputString().split(";", 1)[0] for morsel in cookies.values())
 
     def login(self, username, password):
-        self.post("/api/auth/login", {"username": username, "password": password})
+        with self._login_lock:
+            self._login(username, password)
+            self._credentials = (username, password)
+
+    def _login(self, username, password):
+        self.post("/api/auth/login", {"username": username, "password": password}, use_cookie=False)
         if not self.cookie:
             raise FirmwareError("The KVM did not issue a session. Check if two-factor login is required.")
 
     def ws(self, path):
+        cookie = self.cookie
+        try:
+            return self._ws(path, cookie)
+        except websocket.WebSocketBadStatusException as error:
+            if error.status_code != 401 or self._credentials is None:
+                raise
+        # A background host can outlive its firmware session. Refresh once even
+        # if several relays see the same expired cookie at the same time.
+        with self._login_lock:
+            if self.cookie == cookie:
+                self._login(*self._credentials)
+            cookie = self.cookie
+        return self._ws(path, cookie)
+
+    def _ws(self, path, cookie):
         peer = self.tls()
         try:
             return websocket.create_connection(
                 f"wss://{self.authority}{path}",
                 socket=peer,
-                cookie=self.cookie,
+                cookie=cookie,
                 origin=f"https://{self.authority}",
                 timeout=TIMEOUT,
                 redirect_limit=0,
@@ -268,6 +296,7 @@ class Bridge:
                 continue
             except OSError:
                 break
+            problem = None
             try:
                 with client, closing(self.firmware.ws("/api/stream/h264/direct")) as upstream:
                     client.settimeout(TIMEOUT)
@@ -276,17 +305,28 @@ class Bridge:
                     while not self.stopping.is_set():
                         frame = upstream.recv()
                         if isinstance(frame, bytes) and 10 <= len(frame) <= MAX_FRAME:
+                            problem = None
                             client.sendall(struct.pack(">I", len(frame)) + frame)
                             if not active:
                                 self.status("Streaming NanoKVM")
                                 active = True
-                        elif not frame or time.monotonic() - started > TIMEOUT:
-                            raise FirmwareError("No direct H.264 video. Check the KVM video mode.")
+                        else:
+                            if isinstance(frame, str) and frame:
+                                try:
+                                    notice = json.loads(frame)
+                                except ValueError:
+                                    notice = None
+                                if isinstance(notice, dict) and notice.get("event") == "video-status":
+                                    code = notice.get("data")
+                                    if isinstance(code, str):
+                                        problem = VIDEO_PROBLEMS.get(code)
+                            if not frame or time.monotonic() - started > TIMEOUT:
+                                raise FirmwareError("No direct H.264 video")
             except (BrokenPipeError, ConnectionResetError):
                 self.status("Ready for UU")
             except (OSError, websocket.WebSocketException, FirmwareError):
                 if not self.stopping.is_set():
-                    self.status("KVM video unavailable")
+                    self.status(problem or "KVM video unavailable")
 
     def audio_loop(self):
         from audio import relay_speaker
@@ -315,13 +355,15 @@ class Bridge:
                 try:
                     raw = self.input.recv(65536)
                 except socket.timeout:
-                    if peer and time.monotonic() >= heartbeat_at:
-                        peer.send_binary(b"\0")
-                        heartbeat_at = time.monotonic() + 10
-                    continue
+                    raw = None
                 except OSError:
                     break
                 try:
+                    if raw is None:
+                        if peer and time.monotonic() >= heartbeat_at:
+                            peer.send_binary(b"\0")
+                            heartbeat_at = time.monotonic() + 10
+                        continue
                     report = json.loads(raw)
                     if peer is None:
                         if report.get("event") == "reset":

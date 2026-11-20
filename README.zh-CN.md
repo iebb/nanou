@@ -40,6 +40,12 @@ NanoU 可通过官方 UU 远程客户端或 NanoU 浏览器控制端远程操作
 
 在项目目录中，`python3 -m nanou native-login --bundle /path/to/NanoU-linux-amd64` 与 `python3 -m nanou native --bundle /path/to/NanoU-linux-amd64 …` 会调用同一个程序。直连桥接使用 NanoKVM Go 固件的 H.264 和 HID 接口。
 
+### iPhone 和 iPad
+
+如需让官方 UU 远程客户端持续显示，可在系统设置中选择 **显示与亮度 → 自动锁定 → 永不**（如果有此选项）。桥接服务无法修改手机的自动锁定设置。
+
+锁屏后解锁并返回 UU 远程。连接恢复时，直连桥接服务可从新的 H.264 关键帧恢复画面。如果 UU 已结束会话，请重新打开已配对的设备。
+
 ### Chromium 兼容模式
 
 NanoU 在 Linux 的虚拟显示器中用 Chromium 打开 NanoKVM 控制台，再由 [VallierDev 的 UU 兼容主机程序](https://github.com/VallierDev/uu-remote-linux)将画面发送到官方客户端。键盘和鼠标输入沿相反方向传递。

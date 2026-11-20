@@ -143,7 +143,7 @@ index 32b692d..37c39be 100644
 +    if crate::nanokvm::enabled() {
 +        if !track.supports(VideoCodec::H264) { return Err("UU viewer did not negotiate H.264".into()); }
 +        applied.send_modify(|value| value.codec = VideoCodec::H264);
-+        return crate::nanokvm::stream(pc, track).await;
++        return crate::nanokvm::stream(pc, track, idr).await;
 +    }
      // Portal power/idle policy belongs to its CONTROL-scoped supervisor,
      // including when video has no frames or the user locks manually.

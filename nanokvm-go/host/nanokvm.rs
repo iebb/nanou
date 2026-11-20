@@ -5,6 +5,7 @@ use crate::protocol::{decode_wire, WireValue};
 use crate::video_track::VideoTrack;
 use std::os::unix::net::UnixDatagram;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
@@ -83,9 +84,36 @@ async fn read_frame(stream: &mut UnixStream) -> Result<Vec<u8>, String> {
     Ok(frame)
 }
 
-pub async fn stream(pc: Arc<RTCPeerConnection>, track: Arc<VideoTrack>) -> Result<(), String> {
+pub async fn stream(pc: Arc<RTCPeerConnection>, track: Arc<VideoTrack>, idr_request: Arc<AtomicBool>) -> Result<(), String> {
     let path = socket("video").ok_or("NanoKVM media socket is not configured")?;
-    let mut connection = UnixStream::connect(path).await.map_err(|e| e.to_string())?;
+    while !peer_ended(&pc) {
+        if pc.connection_state() != RTCPeerConnectionState::Connected {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            continue;
+        }
+        let relay = async {
+            let connection = UnixStream::connect(&path).await.map_err(|e| e.to_string())?;
+            relay_video(connection, &track, &idr_request).await
+        };
+        let disconnected = async {
+            while pc.connection_state() == RTCPeerConnectionState::Connected {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        };
+        tokio::select! {
+            result = relay => {
+                if let Err(error) = result {
+                    log::debug!("Reopening NanoKVM video: {error}");
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            _ = disconnected => {}
+        }
+    }
+    Ok(())
+}
+
+async fn relay_video(mut connection: UnixStream, track: &VideoTrack, idr_request: &AtomicBool) -> Result<(), String> {
     let buffer = Mutex::new(VideoBuffer::new());
     let ready = Notify::new();
 
@@ -109,7 +137,15 @@ pub async fn stream(pc: Arc<RTCPeerConnection>, track: Arc<VideoTrack>) -> Resul
     let write = async {
         let extensions = [crate::rtp_metadata::capture_index(0), crate::rtp_metadata::new_frame()];
         loop {
-            let frame = buffer.lock().unwrap().pop(Instant::now());
+            let frame = {
+                let mut buffer = buffer.lock().unwrap();
+                let now = Instant::now();
+                // The viewer may have discarded its decoder state while suspended.
+                if idr_request.swap(false, Ordering::AcqRel) {
+                    buffer.skip_to_keyframe(now);
+                }
+                buffer.pop(now)
+            };
             let Some(frame) = frame else {
                 ready.notified().await;
                 continue;
@@ -128,17 +164,9 @@ pub async fn stream(pc: Arc<RTCPeerConnection>, track: Arc<VideoTrack>) -> Resul
         }
     };
 
-    let wait_for_close = async {
-        while !peer_ended(&pc) {
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-        Ok(())
-    };
-
     tokio::select! {
         result = read => result,
         result = write => result,
-        result = wait_for_close => result,
     }
 }
 

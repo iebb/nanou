@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import socket
 import ssl
 import struct
 import subprocess
@@ -11,13 +12,16 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock, patch
 
 from aiohttp import web
+from websocket import WebSocketTimeoutException
 
 sys.path.insert(0, str(Path(__file__).with_name("nanou")))
 sys.path.insert(0, str(Path(__file__).with_name("host")))
 
-from bridge import Firmware, FirmwareError
+from bridge import Bridge, Firmware, FirmwareError
 from bridge_cli import target
 from runtime import HostRuntime, run_host
 from settings import Settings
@@ -49,6 +53,50 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as video:
 
 
 class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
+    def test_video_reports_firmware_no_image_status(self):
+        upstream = Mock()
+        upstream.recv.side_effect = [
+            '{"event":"video-status","data":"-1"}', WebSocketTimeoutException(),
+        ]
+        receiver = Mock()
+        receiver.accept.side_effect = [(MagicMock(), None), OSError()]
+        bridge = SimpleNamespace(
+            video=receiver, stopping=threading.Event(), firmware=Mock(), status=Mock(),
+        )
+        bridge.firmware.ws.return_value = upstream
+        Bridge.video_loop(bridge)
+        bridge.status.assert_called_once_with("No video signal from the attached computer")
+
+    def test_input_reopens_after_failed_heartbeat(self):
+        old_peer = Mock()
+        old_peer.send_binary.side_effect = [None, BrokenPipeError()]
+        new_peer = Mock()
+        firmware = Mock()
+        firmware.ws.side_effect = [old_peer, new_peer]
+        down = b'{"event":"key","key":65,"down":true}'
+        receiver = Mock()
+        clock = Mock()
+        clock.monotonic.return_value = 0
+
+        def reports():
+            yield down
+            clock.monotonic.return_value = 11
+            yield socket.timeout()
+            yield down
+            yield OSError()
+
+        receiver.recv.side_effect = reports()
+        bridge = SimpleNamespace(
+            input=receiver, stopping=threading.Event(), firmware=firmware,
+            status=Mock(), sensitivity=100,
+        )
+        with patch("bridge.time", clock):
+            Bridge.input_loop(bridge)
+        self.assertEqual(firmware.ws.call_count, 2)
+        old_peer.close.assert_called_once()
+        recovered_report = new_peer.send_binary.call_args_list[0].args[0]
+        self.assertEqual(recovered_report[13:], b"\x00\x00\x04\x00\x00\x00\x00\x00")
+
     def test_https_urls_and_port(self):
         self.assertEqual(target("https://kvm.example:9443/"), ("kvm.example", 9443))
         self.assertEqual(target("https://[::1]/"), ("::1", 443))
@@ -75,10 +123,13 @@ class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
                 logins.append(await request.json())
                 self.assertEqual(request.headers["Origin"], f"https://{request.host}")
                 result = web.json_response({"code": 0})
-                result.set_cookie("fixture_session", "valid")
+                self.assertNotIn("fixture_session", request.cookies)
+                result.set_cookie("fixture_session", "expired" if len(logins) == 1 else "valid")
                 return result
 
             async def endpoint(request):
+                if request.cookies.get("fixture_session") == "expired":
+                    raise web.HTTPUnauthorized()
                 self.assertEqual(request.cookies.get("fixture_session"), "valid")
                 self.assertEqual(request.headers["Origin"], f"https://{request.host}")
                 stream = web.WebSocketResponse()
@@ -136,7 +187,7 @@ class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(keyboard[13:], b"\x00\x00\x04\x00\x00\x00\x00\x00")
                     self.assertEqual(struct.unpack("<Bhhh", mouse[13:]), (0, 6, -4, 0))
                     self.assertEqual((state / "frame.hex").read_text(), FRAME.hex())
-                    self.assertEqual(logins, [{"username": "fixture-user", "password": "fixture-password"}])
+                    self.assertEqual(logins, [{"username": "fixture-user", "password": "fixture-password"}] * 2)
                 finally:
                     cancel.set()
                     self.assertTrue(await asyncio.wait_for(work, 12), status)

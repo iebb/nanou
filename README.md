@@ -40,6 +40,12 @@ The bridge runs a patched UU host as a regular Linux process. It forwards the Na
 
 From a checkout, `python3 -m nanou native-login --bundle /path/to/NanoU-linux-amd64` and `python3 -m nanou native --bundle /path/to/NanoU-linux-amd64 …` call the same launcher. The direct bridge targets the NanoKVM Go firmware’s direct H.264 and HID endpoints.
 
+### iPhone and iPad
+
+To keep the official UU Remote app visible, set **Settings → Display & Brightness → Auto-Lock → Never** if that option is available. The host cannot change the phone’s Auto-Lock setting.
+
+If you lock and unlock the device, return to UU Remote. The direct bridge can restart video from a fresh H.264 keyframe when the connection recovers. If UU has ended the session, open the paired device again.
+
 ### Chromium fallback
 
 The official app connects to [VallierDev’s UU-compatible Linux host](https://github.com/VallierDev/uu-remote-linux). NanoU starts that host on a private virtual display with the NanoKVM web console open in Chromium. Video travels from NanoKVM to Chromium and then through UU Remote. Keyboard and mouse input follow the reverse path.

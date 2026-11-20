@@ -3,7 +3,7 @@
   "name": "NanoU",
   "creator": "NanoU",
   "create_time": "2026-11-20",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "desc": "Stream the locally attached computer to the official UU Remote app.",
   "category": "Remote control",
   "env": {
