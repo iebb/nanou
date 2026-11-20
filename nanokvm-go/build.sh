@@ -21,6 +21,7 @@ cp "$project/host/Dockerfile" "$project/host/compile-arm.sh" "$scratch/"
 printf '%s\n' 'uu-host/.git/' 'remote/' 'wheels/' > "$scratch/.dockerignore"
 docker build --output "type=local,dest=$scratch/runtime" "$scratch"
 cp -R "$scratch/runtime/." "$stage/"
+cp "$project/../LICENSE" "$stage/"
 
 printf 'websocket-client==1.9.0 --hash=sha256:%s\n' "$wheel_hash" > "$scratch/requirements.txt"
 python3 -m pip download --no-deps --require-hashes -r "$scratch/requirements.txt" -d "$scratch/wheels"

@@ -1,6 +1,7 @@
 [project]
 name = "nanou"
 version = "0.1.0"
+license = "GPL-3.0-or-later"
 description = "NanoKVM console access over a UU tunnel"
 requires-python = ">=3.10"
 dependencies = [

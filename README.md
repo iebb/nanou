@@ -53,3 +53,7 @@ Both modes store separate local UU sign-ins under `~/.nanou`. Set `NANOU_STATE_D
 - The [tunnel protocol notes](upstream/docs/protocol/README.md) describe the browser controller’s custom tunnel format.
 - NetEase’s published integration supports launching the mobile client and binding supported Windows/macOS hosts. The official-client mode uses the independent Linux host for session interoperability. [NetEase integration guide](https://github.com/netease-uuyc/uuremote-integration-guide) · [UU Remote Linux](https://github.com/VallierDev/uu-remote-linux)
 - The device console and controls are provided by NanoKVM firmware. [Sipeed NanoKVM](https://github.com/sipeed/NanoKVM)
+
+## License
+
+NanoU is licensed under GPL-3.0-or-later, matching the upstream UU host. See [LICENSE](LICENSE) and the [vendored aioice license](vendor/aioice/LICENSE).

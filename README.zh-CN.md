@@ -53,3 +53,7 @@ Linux 桥接和浏览器控制端分别将 UU 登录状态存放在 `~/.nanou` �
 - [隧道协议说明](upstream/docs/protocol/README.md)记录了浏览器控制端的数据通道格式。
 - 网易公开的集成文档覆盖了移动端客户端唤起和受支持的 Windows、macOS 设备绑定。官方客户端互通由 UU 兼容主机程序实现。[网易 UU 远程集成指南](https://github.com/netease-uuyc/uuremote-integration-guide) · [UU Remote Linux](https://github.com/VallierDev/uu-remote-linux)
 - 控制台和硬件输入由 NanoKVM 固件提供。[Sipeed NanoKVM](https://github.com/sipeed/NanoKVM)
+
+## 许可证
+
+NanoU 采用 GPL-3.0-or-later，与上游 UU 主机项目一致。详见 [LICENSE](LICENSE) 及[随附的 aioice 许可证](vendor/aioice/LICENSE)。
