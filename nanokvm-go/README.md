@@ -23,12 +23,13 @@ Edit NanoU’s app configuration under **Settings → Apps → Installed**. The 
 | Start NanoU at boot | Enter `true` to run in the background and start automatically after reboot. Open NanoU once on the touchscreen to apply the setting and pair if needed. Enter `false` and reopen NanoU to disable the background service. |
 | Stream target audio | Enter `true` to hear the attached computer in UU Remote. Enable **Virtual Audio** and **MCP Service** on the NanoKVM Go, then provide the local **MCP API key for audio** in NanoU’s app settings. |
 | Repair iPhone drag automatically | Enter `true` when the attached target is an iPhone with AssistiveTouch enabled. NanoU runs the repair before the first mouse input after reconnecting. Use Mouse Pointer mode in UU Remote. |
+| Wake target on no signal | Enabled by default. When an active UU connection receives a no-signal notice from NanoKVM, send one small relative mouse movement without clicking. Enter `false` to disable. |
 | Translate clicks to touchscreen taps | Enter `true` to turn primary clicks and drags into one-finger touches. Select **Multi-touch Screen** in the NanoKVM web console, then **Screen Touch** in the UU viewer with **Tablet Touch Mode** off. The attached phone must accept a USB touchscreen. To switch back to a mouse, disable this option and select **Follow Mouse** in the NanoKVM console. |
 | Relative mouse sensitivity | Use 25–400 percent. The default is 100. Absolute pointer mode keeps its screen coordinates. |
 
 Boot startup and audio default to off. Audio sends computer sound to the viewer. The touchscreen must be used for the first UU pairing even with boot startup enabled.
 
-NanoU forwards the firmware’s H.264 stream. Adjust resolution, frame rate, and bitrate in the NanoKVM video settings.
+NanoU forwards the firmware’s H.264 stream and reports its actual display size to UU Remote, including after a resolution change. Adjust resolution, frame rate, and bitrate in the NanoKVM video settings.
 
 ## Video latency
 

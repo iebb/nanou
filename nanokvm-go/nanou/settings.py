@@ -4,8 +4,8 @@ import unicodedata
 from dataclasses import dataclass, field
 
 
-def enabled_setting(values, key, label):
-    value = str(values.get(key, "false")).strip().casefold()
+def enabled_setting(values, key, label, default="false"):
+    value = str(values.get(key, default)).strip().casefold()
     if value in {"1", "true", "yes", "on"}:
         return True
     if value in {"0", "false", "no", "off", ""}:
@@ -32,6 +32,7 @@ class Settings:
     sensitivity: int
     iphone_drag_repair: bool = False
     click_to_touch: bool = False
+    wake_on_no_signal: bool = True
 
     @classmethod
     def from_env(cls, values):
@@ -56,4 +57,5 @@ class Settings:
             sensitivity=sensitivity,
             iphone_drag_repair=enabled_setting(values, "NANOU_IPHONE_DRAG_REPAIR", "Repair iPhone drag"),
             click_to_touch=enabled_setting(values, "NANOU_CLICK_TO_TOUCH", "Click to touch"),
+            wake_on_no_signal=enabled_setting(values, "NANOU_WAKE_ON_NO_SIGNAL", "Wake on no signal", default="true"),
         )

@@ -48,6 +48,40 @@ index 5e6e850..aba8338 100644
          if self.init_error.is_none() && self.backend==crate::desktop_backend::DesktopBackend::X11
              && X11_USERS.fetch_sub(1, std::sync::atomic::Ordering::AcqRel) == 1 { unsafe { x11_close() }; }
      }
+diff --git a/src/capture_setting.rs b/src/capture_setting.rs
+index e548a31..38b0bd3 100644
+--- a/src/capture_setting.rs
++++ b/src/capture_setting.rs
+@@ -232,6 +232,7 @@ fn apply_rpc(rpc: &[WireField], settings: &watch::Sender<VideoSettings>, native:
+     } else {
+         return None;
+     }
++    if crate::nanokvm::enabled() { next.output = None; }
+     next.fps = next.fps.clamp(MIN_FPS, MAX_FPS);
+     settings.send_if_modified(|current| {
+         // The feedback loop owns net_kbps; keep its newest value instead of replaying the snapshot.
+@@ -265,7 +266,7 @@ pub fn rejected_request(data:&[u8],reason:&str)->Option<Vec<u8>> {
+ pub fn screen_sources(seq: u64, timestamp: u64, native: (u32, u32), output: Option<(u32, u32)>, name: &str) -> Result<Vec<u8>, String> {
+     use crate::initialization::{Screen, WinRect};
+     let outputs=crate::wayland::outputs();
+-    if !outputs.is_empty() {
++    if !crate::nanokvm::enabled() && !outputs.is_empty() {
+         let current=crate::wayland::selected();
+         let choices:Vec<Vec<(i32,i32)>>=outputs.iter().map(|m|scaled_sizes((m.width,m.height)).into_iter().map(|(w,h)|(w as i32,h as i32)).collect()).collect();
+         let screens:Vec<Screen<'_>>=outputs.iter().enumerate().map(|(id,m)| Screen {
+@@ -278,7 +279,11 @@ pub fn screen_sources(seq: u64, timestamp: u64, native: (u32, u32), output: Opti
+         return crate::initialization::encode_screen_sources(seq,timestamp,&screens,current as i32);
+     }
+     let (w, h) = (native.0 as i32, native.1 as i32);
+-    let scaled: Vec<(i32, i32)> = scaled_sizes(native).into_iter().map(|(w, h)| (w as i32, h as i32)).collect();
++    let scaled: Vec<(i32, i32)> = if crate::nanokvm::enabled() {
++        vec![(w, h)]
++    } else {
++        scaled_sizes(native).into_iter().map(|(w, h)| (w as i32, h as i32)).collect()
++    };
+     // DPI_SCALE starts at version 5; the observed v4 request uses fields 5/6 as pixels.
+     // Keep every advertised rectangle in that space; Portal/EIS maps input independently.
+     let resolution = WinRect { left: 0, top: 0, width: w, height: h, pixel_width: w, pixel_height: h };
 diff --git a/src/login.rs b/src/login.rs
 index 7dc3587..305b04c 100644
 --- a/src/login.rs
@@ -133,7 +167,7 @@ index a7efef0..a2a8f48 100644
                          for id in superseded_peer_ids(&sessions, &ice, desktop) {
                              if let Some(old) = sessions.remove(&id) { close_peer(&old.pc).await; }
 diff --git a/src/video.rs b/src/video.rs
-index 32b692d..37c39be 100644
+index 32b692d..56cf75f 100644
 --- a/src/video.rs
 +++ b/src/video.rs
 @@ -1198,6 +1198,11 @@ pub async fn stream_desktop_at(pc: Arc<RTCPeerConnection>, track: Arc<crate::vid
@@ -149,9 +183,16 @@ index 32b692d..37c39be 100644
      // including when video has no frames or the user locks manually.
      if portal.is_none() { keep_stream_display_awake(); }
 diff --git a/src/webrtc.rs b/src/webrtc.rs
-index 068558a..ccbf64d 100644
+index 068558a..d0eefa1 100644
 --- a/src/webrtc.rs
 +++ b/src/webrtc.rs
+@@ -235,5 +235,5 @@ impl WebRtcSession {
+         // reload_at_session is the generation at that snapshot. A probe that finishes later is not a reload.
+         let reload_at_session = crate::video_select::reload_generation_value();
+         let video_selection = crate::video_select::selection();
+-        let hevc = desktop && crate::video::hevc_available(video_selection.encoder).await;
++        let hevc = desktop && !crate::nanokvm::enabled() && crate::video::hevc_available(video_selection.encoder).await;
+         if hevc { crate::video_track::register_hevc(&mut m).map_err(|e| format!("Register HEVC failed: {e}"))?; }
 @@ -350,6 +350,9 @@ impl WebRtcSession {
                      if state==RTCPeerConnectionState::Connected {session.connected();}
                      if matches!(state,RTCPeerConnectionState::Closed|RTCPeerConnectionState::Failed|RTCPeerConnectionState::Disconnected) {session.disconnected();}
@@ -205,7 +246,58 @@ index 068558a..ccbf64d 100644
                  let lbl = label.clone();
                  let inp = input_inst.clone();
                  let d_reply = d.clone();
-@@ -1247,6 +1259,17 @@ impl WebRtcSession {
+@@ -801,7 +813,7 @@ impl WebRtcSession {
+                                     None => None,
+                                 }
+                             } else { None };
+-                            let input_size = resized.unwrap_or(input_size);
++                            let input_size = crate::nanokvm::screen_size().or(resized).unwrap_or(input_size);
+                             let before = *settings.borrow();
+                             let output_before = before.output;
+                             let revision = track.revision();
+@@ -1089,6 +1101,7 @@ impl WebRtcSession {
+                             let (mut desktop, mut promoted, mut lock_reported) = (desktop, false, desktop);
+                             let mut privacy_reported = false;
+                             let mut screen = screen;
++                            let mut nano_sizes = crate::nanokvm::enabled().then(crate::nanokvm::screen_changes);
+                             loop {
+                             loop {
+                                 let timestamp = std::time::SystemTime::now()
+@@ -1099,7 +1112,10 @@ impl WebRtcSession {
+                                 } else { crate::system_metrics::Permission::Reject };
+                                 // Without a desktop (headless/portal before consent) the port-mapping tool still waits
+                                 // for ScreenSources/CaptureChange and aborts otherwise: tool peers get a nominal screen.
+-                                let screen_size=crate::wayland::input_size(if screen.init_error.is_none() { (screen.width, screen.height) } else { (1920, 1080) });
++                                let direct_size = nano_sizes.as_mut().and_then(|sizes| *sizes.borrow_and_update());
++                                let screen_size = direct_size.unwrap_or_else(|| crate::wayland::input_size(
++                                    if screen.init_error.is_none() { (screen.width, screen.height) } else { (1920, 1080) }
++                                ));
+                                 let messages = [
+                                     (8, crate::initialization::encode_capture_change(next_seq(), timestamp, 0, crate::wayland::selected() as i32, "Linux desktop")),
+                                     (13, Ok(crate::initialization::envelope(next_seq(), timestamp, 13, &init_actions.metrics_payload(desktop_sound, desktop_permission)))),
+@@ -1107,7 +1123,7 @@ impl WebRtcSession {
+                                         &crate::system_metrics::remote_download_path(&home)))),
+                                     (18, Ok(crate::initialization::envelope(next_seq(), timestamp, 18,
+                                         &crate::capture_setting::codec_negotiation(screen_size, crate::video::display_fps(), init_track.supports(crate::capture_setting::VideoCodec::H265))))),
+-                                    (7, crate::capture_setting::screen_sources(next_seq(), timestamp, screen_size, init_video.borrow().output, "Linux desktop")),
++                                    (7, crate::capture_setting::screen_sources(next_seq(), timestamp, screen_size, direct_size.or(init_video.borrow().output), "Linux desktop")),
+                                 ];
+                                 if desktop && screen.init_error.is_none() {
+                                     let codec = crate::capture_setting::preferred_codec_for(init_track.supports(crate::capture_setting::VideoCodec::H264),
+@@ -1139,6 +1155,12 @@ impl WebRtcSession {
+                                 screen = role.screen_or(&screen);
+                                 replay_clipboard_echo(channel.clone(), sequence.clone(), replay.clone(), role.clone());
+                             }
++                            if let Some(sizes) = nano_sizes {
++                                crate::nanokvm::report_screen_changes(
++                                    channel, sequence, sizes, init_video,
++                                ).await;
++                                return;
++                            }
+                             if !lock_reported {
+                                 lock_reported = true;
+                                 tokio::spawn(crate::session_lock::report_states(channel.clone(), sequence.clone(), crate::session_lock::watch_locked()));
+@@ -1247,6 +1269,17 @@ impl WebRtcSession {
                      let capture_requests = capture_tx.clone();
  
                      Box::pin(async move {

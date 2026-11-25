@@ -296,7 +296,7 @@ class HID:
 
 class Bridge:
     def __init__(self, firmware, directory, status, sensitivity=100, audio_key="", *,
-                 iphone_drag_repair=False, click_to_touch=False):
+                 iphone_drag_repair=False, click_to_touch=False, wake_on_no_signal=True):
         self.firmware = firmware
         self.directory = directory
         self.status = status
@@ -304,6 +304,11 @@ class Bridge:
         self.iphone_drag_repair = iphone_drag_repair and not click_to_touch
         self.click_to_touch = click_to_touch
         self.iphone_video_recovered = threading.Event()
+        self.wake_requested = threading.Event()
+        self.wake_armed = threading.Event()
+        if wake_on_no_signal:
+            self.wake_armed.set()
+        self.wake_on_no_signal = wake_on_no_signal
         self.stopping = threading.Event()
         self.video = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.input = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -362,6 +367,9 @@ class Bridge:
                         frame = upstream.recv()
                         if isinstance(frame, bytes) and 10 <= len(frame) <= MAX_FRAME:
                             problem = None
+                            if self.wake_on_no_signal:
+                                self.wake_requested.clear()
+                                self.wake_armed.set()
                             if no_image:
                                 self.iphone_video_recovered.set()
                                 no_image = False
@@ -381,6 +389,9 @@ class Bridge:
                                         problem = VIDEO_PROBLEMS.get(code)
                                         if self.iphone_drag_repair and code == "-1":
                                             no_image = True
+                                        if code == "-1" and self.wake_armed.is_set():
+                                            self.wake_armed.clear()
+                                            self.wake_requested.set()
                             if not frame or time.monotonic() - started > TIMEOUT:
                                 raise FirmwareError("No direct H.264 video")
             except (BrokenPipeError, ConnectionResetError):
@@ -421,13 +432,17 @@ class Bridge:
                 except OSError:
                     break
                 try:
-                    if raw is None:
+                    wake = raw is None and self.wake_requested.is_set() and (peer is None or not hid.buttons)
+                    if raw is None and not wake:
                         if peer and time.monotonic() >= heartbeat_at:
                             peer.send_binary(b"\0")
                             heartbeat_at = time.monotonic() + 10
                         continue
-                    report = json.loads(raw)
+                    report = {"event": "wake"} if wake else json.loads(raw)
                     kind = report.get("event")
+                    if kind == "reset" and self.wake_on_no_signal:
+                        self.wake_requested.clear()
+                        self.wake_armed.set()
                     if peer is None:
                         if kind == "reset":
                             continue
@@ -435,6 +450,11 @@ class Bridge:
                         hid = HID(peer, self.sensitivity, click_to_touch=self.click_to_touch)
                         heartbeat_at = time.monotonic() + 10
                         repair_pending = self.iphone_drag_repair
+                    if wake:
+                        if self.wake_requested.is_set():
+                            self.wake_requested.clear()
+                            hid.pointer(1, relative=True)
+                        continue
                     if (kind in POINTER_EVENTS and not hid.buttons
                             and (repair_pending or self.iphone_video_recovered.is_set())):
                         self.iphone_video_recovered.clear()

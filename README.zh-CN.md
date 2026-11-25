@@ -40,6 +40,8 @@ NanoU 可通过官方 UU 远程客户端或 NanoU 浏览器控制端远程操作
 
 在项目目录中，`python3 -m nanou native-login --bundle /path/to/NanoU-linux-amd64` 与 `python3 -m nanou native --bundle /path/to/NanoU-linux-amd64 …` 会调用同一个程序。直连桥接使用 NanoKVM Go 固件的 H.264 和 HID 接口。
 
+桥接服务会将 H.264 的实际画面尺寸同步到 UU 远程。UU 连接期间，如果 NanoKVM 报告无视频信号，桥接服务会轻微移动一次鼠标。设置 `NANOU_WAKE_ON_NO_SIGNAL=false` 可关闭此行为。
+
 ### iPhone 和 iPad
 
 如果连接到 NanoKVM Go 的目标设备是 iPhone，请在该设备上开启辅助触控。启动 Linux 直连桥接时加上 `--iphone-drag-repair`，即可在重新连接后的第一次鼠标输入前自动修复拖拽。请在 UU 远程中使用鼠标指针模式。

@@ -40,6 +40,8 @@ The bridge runs a patched UU host as a regular Linux process. It forwards the Na
 
 From a checkout, `python3 -m nanou native-login --bundle /path/to/NanoU-linux-amd64` and `python3 -m nanou native --bundle /path/to/NanoU-linux-amd64 …` call the same launcher. The direct bridge targets the NanoKVM Go firmware’s direct H.264 and HID endpoints.
 
+The bridge reports the actual H.264 display size to UU Remote. When NanoKVM reports no video signal during a UU connection, the bridge sends one small mouse movement. Set `NANOU_WAKE_ON_NO_SIGNAL=false` to disable it.
+
 ### iPhone and iPad
 
 If an iPhone is the target plugged into NanoKVM Go, enable AssistiveTouch on that phone. Start the direct Linux bridge with `--iphone-drag-repair` to run the repair before the first mouse input after reconnecting. In UU Remote, use Mouse Pointer mode.

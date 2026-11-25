@@ -62,11 +62,15 @@ class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
         receiver.accept.side_effect = [(MagicMock(), None), OSError()]
         bridge = SimpleNamespace(
             video=receiver, stopping=threading.Event(), firmware=Mock(), status=Mock(),
-            iphone_drag_repair=False,
+            iphone_drag_repair=False, wake_armed=threading.Event(),
+            wake_requested=threading.Event(),
         )
+        bridge.wake_armed.set()
         bridge.firmware.ws.return_value = upstream
         Bridge.video_loop(bridge)
         bridge.status.assert_called_once_with("No video signal from the attached computer")
+        self.assertTrue(bridge.wake_requested.is_set())
+        self.assertFalse(bridge.wake_armed.is_set())
 
     def test_input_reopens_after_failed_heartbeat(self):
         old_peer = Mock()
@@ -90,7 +94,7 @@ class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
         bridge = SimpleNamespace(
             input=receiver, stopping=threading.Event(), firmware=firmware,
             status=Mock(), sensitivity=100, iphone_drag_repair=False, click_to_touch=False,
-            iphone_video_recovered=threading.Event(),
+            iphone_video_recovered=threading.Event(), wake_requested=threading.Event(),
         )
         with patch("bridge.time", clock):
             Bridge.input_loop(bridge)
@@ -118,7 +122,7 @@ class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
         bridge = SimpleNamespace(
             input=receiver, stopping=threading.Event(), firmware=Mock(),
             status=Mock(), sensitivity=100, iphone_drag_repair=True, click_to_touch=False,
-            iphone_video_recovered=video_recovered,
+            iphone_video_recovered=video_recovered, wake_requested=threading.Event(), wake_on_no_signal=False,
         )
         bridge.firmware.ws.side_effect = [first, second]
         with patch("bridge.time.sleep") as delay:
@@ -132,6 +136,22 @@ class LinuxBridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(packet[3] == 3 for packet in packets[:len(expected)]))
             self.assertEqual(decoded, expected)
         self.assertEqual([call.args for call in delay.call_args_list], [(0.030,)] * 3)
+
+    def test_wake_sends_one_relative_movement_without_buttons(self):
+        receiver = Mock()
+        receiver.recv.side_effect = [socket.timeout(), socket.timeout(), OSError()]
+        peer = Mock()
+        requested = threading.Event()
+        requested.set()
+        bridge = SimpleNamespace(
+            input=receiver, stopping=threading.Event(), firmware=Mock(),
+            status=Mock(), sensitivity=200, iphone_drag_repair=False, click_to_touch=False,
+            wake_requested=requested,
+        )
+        bridge.firmware.ws.return_value = peer
+        Bridge.input_loop(bridge)
+        movements = [call.args[0] for call in peer.send_binary.call_args_list if call.args[0][2:4] == b"\x02\x02"]
+        self.assertEqual([struct.unpack("<Bhhh", packet[13:]) for packet in movements], [(0, 1, 0, 0), (0, 0, 0, 0)])
 
     def test_touchscreen_tap_drag_and_reset(self):
         peer = Mock()

@@ -20,7 +20,7 @@ git init -q "$upstream"
 git -C "$upstream" fetch --depth 1 https://github.com/VallierDev/uu-remote-linux.git "$revision"
 git -C "$upstream" checkout --detach FETCH_HEAD
 git -C "$upstream" apply "$project/host/nanokvm.patch"
-cp "$project/host/nanokvm.rs" "$project/host/low_latency.rs" "$upstream/src/"
+cp "$project/host/nanokvm.rs" "$project/host/low_latency.rs" "$project/host/h264_dimensions.rs" "$upstream/src/"
 
 mkdir -p "$stage" "$scratch/wheels"
 cp "$project/nanou/audio.py" "$project/nanou/bridge.py" "$project/nanou/runtime.py" \

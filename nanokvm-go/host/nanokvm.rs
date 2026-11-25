@@ -10,13 +10,55 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::net::UnixStream;
-use tokio::sync::Notify;
+use tokio::sync::{watch, Notify};
+use webrtc::data_channel::{data_channel_state::RTCDataChannelState, RTCDataChannel};
 use webrtc::media::Sample;
 use webrtc::peer_connection::{peer_connection_state::RTCPeerConnectionState, RTCPeerConnection};
 
 #[path = "low_latency.rs"]
 mod low_latency;
+#[path = "h264_dimensions.rs"]
+mod h264_dimensions;
 use low_latency::{Frame, VideoBuffer, MAX_AGE};
+
+fn dimensions() -> &'static watch::Sender<Option<(u32, u32)>> {
+    static DIMENSIONS: OnceLock<watch::Sender<Option<(u32, u32)>>> = OnceLock::new();
+    DIMENSIONS.get_or_init(|| watch::channel(None).0)
+}
+
+pub fn screen_size() -> Option<(u32, u32)> {
+    *dimensions().borrow()
+}
+
+pub fn screen_changes() -> watch::Receiver<Option<(u32, u32)>> {
+    dimensions().subscribe()
+}
+
+pub async fn report_screen_changes(
+    channel: Arc<RTCDataChannel>,
+    sequence: Arc<std::sync::atomic::AtomicU64>,
+    mut sizes: watch::Receiver<Option<(u32, u32)>>,
+    settings: Arc<watch::Sender<crate::capture_setting::VideoSettings>>,
+) {
+    while channel.ready_state() == RTCDataChannelState::Open {
+        tokio::select! {
+            result = sizes.changed() => if result.is_err() { return; },
+            _ = tokio::time::sleep(Duration::from_millis(500)) => continue,
+        }
+        let Some(size) = *sizes.borrow_and_update() else { continue };
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+        let seq = || sequence.fetch_add(1, Ordering::Relaxed);
+        let Ok(sources) = crate::capture_setting::screen_sources(seq(), ts, size, Some(size), "NanoKVM") else { return };
+        let settings = crate::capture_setting::VideoSettings { output: Some(size), ..*settings.borrow() };
+        let sync = crate::initialization::envelope(seq(), ts, 25, &crate::capture_setting::sync_payload(&settings, size));
+        for message in [sources, sync] {
+            if channel.send(&bytes::Bytes::from(message)).await.is_err() {
+                return;
+            }
+        }
+    }
+}
 
 pub fn enabled() -> bool {
     std::env::var_os("NANOU_DEVICE_SOCKET_DIR").is_some()
@@ -123,6 +165,15 @@ async fn relay_video(mut connection: UnixStream, track: &VideoTrack, idr_request
         loop {
             let packet = tokio::time::timeout(Duration::from_secs(8), read_frame(&mut connection))
                 .await.map_err(|_| "Timed out waiting for NanoKVM H.264 video")??;
+            if packet[0] == 1 || screen_size().is_none() {
+                if let Some(size) = h264_dimensions::dimensions(&packet[9..]) {
+                    dimensions().send_if_modified(|current| {
+                        if *current == Some(size) { return false; }
+                        *current = Some(size);
+                        true
+                    });
+                }
+            }
             let pts = u64::from_le_bytes(packet[1..9].try_into().unwrap());
             let delta = previous_pts.and_then(|previous| pts.checked_sub(previous))
                 .filter(|delta| (1_000..=250_000).contains(delta)).unwrap_or(33_333);

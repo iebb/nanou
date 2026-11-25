@@ -3,7 +3,7 @@
   "name": "NanoU",
   "creator": "NanoU",
   "create_time": "2026-11-20",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "desc": "Stream the locally attached computer to the official UU Remote app.",
   "category": "Remote control",
   "env": {
@@ -37,6 +37,11 @@
     "NANOU_KVM_MCP_KEY": {
       "label": "Local NanoKVM MCP API key for audio",
       "secret": true
+    },
+    "NANOU_WAKE_ON_NO_SIGNAL": {
+      "label": "Wake target on no signal",
+      "description": "Send one small mouse movement when the target reports no video signal. Enter false to disable.",
+      "default": "true"
     },
     "NANOU_CLICK_TO_TOUCH": {
       "label": "Translate clicks to touchscreen taps",
